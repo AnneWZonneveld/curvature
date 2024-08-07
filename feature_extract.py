@@ -223,6 +223,7 @@ def curve_analysis(pixels, activations, layer):
         name of specified layer
 
     """
+    tic = time.time()
 
     layer_activations = activations[layer]
     curves = []
@@ -254,6 +255,9 @@ def curve_analysis(pixels, activations, layer):
     df['rel_norm'] = rel_norms
     df['video_id'] = np.array([*range(layer_activations.shape[0])]) + 1
     df['activation'] = activations_list
+
+    toc = time.time()
+    print(f'analysis done in {toc-tic} seconds')
 
     return df
 
