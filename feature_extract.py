@@ -260,33 +260,44 @@ def curve_analysis(pixels, activations, layer):
 
 # ------------------- MAIN
 # Load model
-# model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=True)
-model = torch.hub.load('facebookresearch/pytorchvideo', 'slow_r50', pretrained=True)
+model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=True)
+# model = torch.hub.load('facebookresearch/pytorchvideo', 'slow_r50', pretrained=True)
 
 # Load videos
 # data_dir = args.data_dir
-data_dir = '/Users/annewzonneveld/Documents/phd/projects/curvature/test_data/'
-files = sorted(glob.glob(os.path.join(data_dir, '*mp4')))
-encoded_videos = encode_videos(model_name='slow_r50', files=files)
-# encoded_videos = encode_videos(model=args.model_name, files=files)
+# data_dir = '/Users/annewzonneveld/Documents/phd/projects/curvature/test_data/'
+# data_dir = '/home/azonnev/data/boldmoments/stimulus_set/mp4_h264/'
+# files = sorted(glob.glob(os.path.join(data_dir, '*mp4')))
+files = sorted(glob.glob(os.path.join(args.data_dir, '*mp4')))
+batches = 19
+batch_size = int(len(files)/batches)
 
-# Get activations
-# activations = layers_activations(model=model, layers=args.layer, inputs=encoded_videos)
-layer = 'blocks.4.res_blocks.2.activation'
-activations = layer_activations(model=model, layer=layer, inputs=encoded_videos)
+results_df = pd.DataFrame()
+for batch in range(batches):
 
-# Calculate curvature & norm
-# results = curve_analysis(pixels=encoded_videos, activations=activations, layer=args.layer)
-results = curve_analysis(pixels=encoded_videos, activations=activations, layer=layer)
+    batch_files = files[int(batch*batch_size):int((batch+1)*batch_size)]
+    # encoded_videos = encode_videos(model_name='slow_r50', files=files)
+    encoded_videos = encode_videos(model_name=args.model_name, files=files)
+
+    # Get activations
+    activations = layers_activations(model=model, layers=args.layer, inputs=encoded_videos)
+    # layer = 'blocks.4.res_blocks.2.activation'
+    # activations = layer_activations(model=model, layer=layer, inputs=encoded_videos)
+
+    # Calculate curvature & norm
+    results = curve_analysis(pixels=encoded_videos, activations=activations, layer=args.layer)
+    # results = curve_analysis(pixels=encoded_videos, activations=activations, layer=layer)
+    results_df = pd.concat([results_df, results], axis=0)
 
 # Save results
 # wd = arg.wd
-wd = '/Users/annewzonneveld/Documents/phd/projects/curvature'
-# res_folder = wd + f'/results/features/{args.model}/{args.layer}'
-res_folder = wd + f'/results/features/slow_r50/blocks.4.res_blocks.2.activation'
+# wd = '/Users/annewzonneveld/Documents/phd/projects/curvature'
+# wd = '/home/azonnev/analyses/curvature'
+res_folder = args.wd + f'/results/features/{args.model_name}/{args.layer}'
+# res_folder = wd + f'/results/features/slow_r50/blocks.4.res_blocks.2.activation'
 if not os.path.exists(res_folder) == True:
     os.makedirs(res_folder)
 
 file_path = res_folder + '/res_df.pkl'
 with open(file_path, 'wb') as f:
-    pickle.dump(results, f)
+    pickle.dump(results_df, f)
