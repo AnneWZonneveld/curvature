@@ -63,6 +63,7 @@ def scatter_plot(df, data_type='stand'):
     plt.clf()
 
 
+# ------------------- Plot
 sns.set_style('white')
 sns.set_style("ticks")
 sns.set_context('paper', 
