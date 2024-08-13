@@ -443,11 +443,67 @@ def asses_control(curve_data, n_samples=1000, n_control_videos=25, x1='curve', x
 
     freq_controls(control_df=df, x1=x1, x2=x2)
 
+def calc_lse(activation):
+    """
+    Calculate least squared error between actualy temporal trajectory 
+    and shortest straight interpolated trajectory.
+    """
+
+    num_timepoints = activation.shape[2]
+    start_rep = activation[:, :, 0, :, :]
+    end_rep =  activation[:, :, -1, :, :]
+
+    # Interpolate shortest mean trajectory 
+    mean_trajectory = np.array([
+    start_rep + (t / (num_timepoints - 1)) * (end_rep - start_rep)
+    for t in range(num_timepoints)])
+    mean_trajectory = np.stack(mean_trajectory, axis=0).transpose(1, 2, 0, 3, 4)
+
+    # Calculate squared errors relative to the mean trajectory
+    lse= np.sum((activation - mean_trajectory) ** 2)
+
+    # Normalize
+    lse = lse / num_timepoints
+
+    return lse
+
+def calc_deviation(activation):
+
+    num_frames = activation.shape[2]
+    vectors = [(activation[:, :, i, :, :].flatten() -  activation[:, :, i + 1, :, :].flatten()) 
+    / np.linalg.norm(activation[:, :, i, :, :].flatten() - activation[:, :, i + 1, :, :].flatten()) for i in range(num_frames-1)]
+    mean_vector = np.mean(activation, axis=2).flatten()
+    deviations = [mean_vector - vector for vector in vectors]
+    deviations = np.stack(deviations, axis=0)
+    
+    shell()
+    norms = np.linalg.norm(deviations, axis=1)
+    # Not done yet
+
+ 
+
+def second_order_stats(curve_data):
+    """
+    Calculate lse and deviation and add to curve df for further analysis.
+    """
+    
+    lses = []
+    deviations = []
+    for video in range(len(curve_data)):
+        activation = curve_data['activation'].iloc[video].numpy()
+        lses.append(calc_lse(activation))
+        deviations.append(calc_deviation(activation))
+
+    curve_data['lse'] = lses
+
+    return curve_data
+
 
 
 # ------------------ MAIN
 curve_data = load_data()
 curve_data = curve_data.reset_index()   
+second_order_stats(curve_data=curve_data)
 # scatter_plot(df=curve_data, data_type='stand')
 # scatter_plot(df=curve_data, data_type='pixel')
 # scatter_plot(df=curve_data, data_type='rel')
