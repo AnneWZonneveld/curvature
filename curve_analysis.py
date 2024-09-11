@@ -19,6 +19,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt 
 from sklearn.utils import resample
 from IPython import embed as shell
+from scipy.stats import pearsonr, spearmanr
 import tensorflow as tf
 import tensorflow_hub as hub
 from datasets import Dataset
@@ -58,29 +59,26 @@ sns.set_context('paper',
 
 # ----------------------------
 def load_data(): 
-    print('Loading curvature results')
-    curve_dir = args.wd + f'/results/features/{args.model_name}/{args.layer}/'
-    curve_file = curve_dir + 'res_df.pkl'
+    print('Loading activations')
+    activation_dir = args.wd + f'/results/features/{args.model_name}/{args.layer}/'
+    activation_file = activation_dir + 'res_df.pkl'
 
-    with open(curve_file, 'rb') as f:
-        curve_data = pickle.load(f)
+    with open(activation_file, 'rb') as f:
+        activation_data = pickle.load(f)
     
-    return curve_data
+    return activation_data
 
-def scatter_plot(df, data_type='stand'):
-    if data_type == 'stand':
-        x ='curve'
-        y ='norm'
-    elif data_type =='pixel':
-        x = 'pixel_curve'
-        y ='pixel_norm'
-    elif data_type == 'rel':
-        x = 'rel_curve'
-        y = 'rel_norm'
+def scatter_plot(df, x, y):
 
+    # Test correlation
+    res = spearmanr(df[x], df[y])
+    stat = round(res[0], 4)
+    p_val = round(res[1], 4)
+
+    # Plot
     fig, ax = plt.subplots(dpi=300)
     sns.scatterplot(data=df, x=x, y=y)
-    ax.set_title(f'{args.model_name} {args.layer}')
+    ax.set_title(f'{args.model_name} {args.layer}''\n'f'spearman: {stat}, p: {p_val}')
     ax.set_xlabel(x)
     ax.set_ylabel(y)
     sns.despine(offset= 10, top=True, right=True)
@@ -90,7 +88,7 @@ def scatter_plot(df, data_type='stand'):
     if not os.path.exists(output_dir) == True:
         os.makedirs(output_dir)
 
-    img_path = output_dir + f'/scatter_{data_type}.png'
+    img_path = output_dir + f'/scatter_{x}_{y}.png'
     plt.savefig(img_path)
     plt.clf()
 
@@ -443,24 +441,46 @@ def asses_control(curve_data, n_samples=1000, n_control_videos=25, x1='curve', x
 
     freq_controls(control_df=df, x1=x1, x2=x2)
 
+def calc_norm(activation):
+    num_frames = activation.shape[1]
+    vectors = [activation[:, i, :, :].flatten() -  activation[:, i + 1, :, :].flatten() for i in range(num_frames-1)]
+    norms = [np.linalg.norm(vectors[i]) for i in range(len(vectors))]
+    norm = np.mean(norms)
+
+    return norm
+
+def calc_curve(activation):
+    """
+    Version based on Henaff 2021
+    """
+
+    num_frames = activation.shape[1]
+    vectors = [(activation[:, i, :, :].flatten() -  activation[:, i + 1, :, :].flatten()) 
+    / np.linalg.norm(activation[:, i, :, :].flatten() - activation[:, i + 1, :, :].flatten()) for i in range(num_frames-1)]
+    curves = [np.arccos(np.dot(vectors[i], vectors[i+1])) for i in range(len(vectors)-1)]
+    curve = np.mean(curves) if curves else 0
+    curve = np.degrees(curve)
+
+    return curve
+
 def calc_lse(activation):
     """
     Calculate least squared error between actualy temporal trajectory 
     and shortest straight interpolated trajectory.
     """
 
-    num_timepoints = activation.shape[2]
-    start_rep = activation[:, :, 0, :, :]
-    end_rep =  activation[:, :, -1, :, :]
+    num_timepoints = activation.shape[1]
+    start_rep = activation[:, 0, :, :]
+    end_rep =  activation[:, -1, :, :]
 
     # Interpolate shortest mean trajectory 
     mean_trajectory = np.array([
     start_rep + (t / (num_timepoints - 1)) * (end_rep - start_rep)
     for t in range(num_timepoints)])
-    mean_trajectory = np.stack(mean_trajectory, axis=0).transpose(1, 2, 0, 3, 4)
+    mean_trajectory = np.stack(mean_trajectory, axis=0).transpose(1, 0, 2, 3)
 
     # Calculate squared errors relative to the mean trajectory
-    lse= np.sum((activation - mean_trajectory) ** 2)
+    lse= np.sum(abs(activation - mean_trajectory) ** 2)
 
     # Normalize
     lse = lse / num_timepoints
@@ -469,45 +489,93 @@ def calc_lse(activation):
 
 def calc_deviation(activation):
 
-    num_frames = activation.shape[2]
-    vectors = [(activation[:, :, i, :, :].flatten() -  activation[:, :, i + 1, :, :].flatten()) 
-    / np.linalg.norm(activation[:, :, i, :, :].flatten() - activation[:, :, i + 1, :, :].flatten()) for i in range(num_frames-1)]
-    mean_vector = np.mean(activation, axis=2).flatten()
+    num_frames = activation.shape[1]
+    vectors = [(activation[:, i, :, :].flatten() -  activation[:, i + 1, :, :].flatten()) 
+    / np.linalg.norm(activation[:, i, :, :].flatten() - activation[:, i + 1, :, :].flatten()) for i in range(num_frames-1)]
+    shell()
+    mean_vector = np.mean(activation, axis=1).flatten()
     deviations = [mean_vector - vector for vector in vectors]
     deviations = np.stack(deviations, axis=0)
     
-    shell()
     norms = np.linalg.norm(deviations, axis=1)
     # Not done yet
 
- 
 
-def second_order_stats(curve_data):
+def calc_properties(activation_data):
     """
-    Calculate lse and deviation and add to curve df for further analysis.
+    Calculate geometric properties for pixel and feature space as
+    specified for further analysis.
     """
     
+    curves = []
+    norms = []
     lses = []
-    deviations = []
-    for video in range(len(curve_data)):
-        activation = curve_data['activation'].iloc[video].numpy()
-        lses.append(calc_lse(activation))
-        deviations.append(calc_deviation(activation))
+    pixel_curves = []
+    pixel_norms = []
+    pixel_lses = []
+    rel_curves = [] 
+    rel_norms = []
+    rel_lses = []
+    # deviations = []
 
-    curve_data['lse'] = lses
+    for video in range(len(activation_data)):
+        activation = activation_data['activation'].iloc[video].numpy()
+        pixels = activation_data['pixels'].iloc[video].numpy()
 
-    return curve_data
+        curve = calc_curve(activation)
+        norm = calc_norm(activation)
+        lse = calc_lse(activation)
+
+        pixel_curve = calc_curve(pixels)
+        pixel_norm = calc_norm(pixels)
+        pixel_lse = calc_lse(pixels)
+
+        rel_curve = curve - pixel_curve
+        rel_norm = norm -  pixel_norm
+        rel_lse = lse - pixel_lse
+
+        curves.append(curve)
+        norms.append(norm)
+        lses.append(lse)
+        pixel_curves.append(pixel_curve)
+        pixel_norms.append(pixel_norm)
+        pixel_lses.append(pixel_lse)
+        rel_curves.append(rel_curve)
+        rel_norms.append(rel_norm)
+        rel_lses.append(rel_lse)
+        # deviations.append(calc_deviation(activation))
+
+    activation_data['curve'] = curves
+    activation_data['norm'] = norms
+    activation_data['lse'] = lses
+    activation_data['pixel_curve'] = pixel_curves
+    activation_data['pixel_norm'] = pixel_norms
+    activation_data['pixel_lse'] = pixel_lses
+    activation_data['rel_curve'] = rel_curves
+    activation_data['rel_norm'] = rel_norms
+    activation_data['rel_lse'] = rel_lses
+
+    return activation_data
 
 
 
 # ------------------ MAIN
-curve_data = load_data()
-curve_data = curve_data.reset_index()   
-second_order_stats(curve_data=curve_data)
-# scatter_plot(df=curve_data, data_type='stand')
-# scatter_plot(df=curve_data, data_type='pixel')
-# scatter_plot(df=curve_data, data_type='rel')
+activation_data = load_data()
+activation_data = activation_data.reset_index()   
+# curve_data = second_order_stats(curve_data=curve_data)
+curve_data = calc_properties(activation_data=activation_data)
+
+shell()
+
+# Plot relationships variables of interest 
+scatter_plot(df=curve_data, x='curve', y='norm')
+scatter_plot(df=curve_data, x='lse', y='norm')
+scatter_plot(df=curve_data, x='pixel_curve', y='pixel_norm')
+scatter_plot(df=curve_data, x='pixel_lse', y='pixel_norm')
+scatter_plot(df=curve_data, x='rel_curve', y='norm')
+
+# Qualitative inspections
 # scatter_control(curve_data=curve_data, n_samples=1000, n_control_videos=25, x1='curve', x2='norm')
-cluster_control(curve_data=curve_data, x1='curve', x2='norm')
+# cluster_control(curve_data=curve_data, x1='curve', x2='norm')
 
 

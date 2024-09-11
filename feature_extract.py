@@ -1,7 +1,7 @@
 """
 Video-feature extracting
 
-uses python 3.7
+uses python 3.7 --> use py37 env
 
 """
 
@@ -16,6 +16,7 @@ import os
 import json
 import urllib
 import pandas as pd
+from IPython import embed as shell
 import torch 
 from torchvision.transforms import Compose, Lambda
 from torchvision.transforms._transforms_video import (
@@ -57,7 +58,7 @@ def transform_clips(video, model_name='slow_r50'):
     """
 
     # Define parameters based on model
-    if model_name == 'slow_r50':
+    if model_name in  ['slow_r50', 'i3d_r50']:
         side_size = 256
         mean = [0.45, 0.45, 0.45]
         std = [0.225, 0.225, 0.225]
@@ -182,91 +183,6 @@ def layer_activations(model, layer, inputs):
     
     return activations
 
-def cosine_similarity(vec1, vec2):
-    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
-
-# def calc_curve(representations):
-#     """Version based on Henart 2022"""
-#     num_frames = representations.shape[2]
-#     vectors = [representations[:, :, i, :, :].flatten() -  representations[:, :, i + 1, :, :].flatten() for i in range(num_frames-1)]
-#     cos_sims = [cosine_similarity(vectors[i], vectors[i+1]) for i in range(len(vectors)-1)]
-#     curve = np.mean(cos_sims) if cos_sims else 0
-#     return curve
-
-def calc_norm(representations):
-    num_frames = representations.shape[2]
-    vectors = [representations[:, :, i, :, :].flatten() -  representations[:, :, i + 1, :, :].flatten() for i in range(num_frames-1)]
-    norms = [np.linalg.norm(vectors[i]) for i in range(len(vectors))]
-    norm = np.mean(norms)
-    return norm
-
-
-def calc_curve(representations):
-    """
-    Version based on Henaff 2021
-    """
-    num_frames = representations.shape[2]
-    vectors = [(representations[:, :, i, :, :].flatten() -  representations[:, :, i + 1, :, :].flatten()) 
-    / np.linalg.norm(representations[:, :, i, :, :].flatten() - representations[:, :, i + 1, :, :].flatten()) for i in range(num_frames-1)]
-    curves = [np.arccos(np.dot(vectors[i], vectors[i+1])) for i in range(len(vectors)-1)]
-    curve = np.mean(curves) if curves else 0
-    curve = np.degrees(curve)
-    return curve
-
-
-def curve_analysis(pixels, activations, layer):
-    """
-    Calculate the curvature and norm for all specfied videos.
-
-    Parameters 
-    ----------
-
-    activations: 5 dimensional tensor of encoded videos (# of videos, RGB, # of frames, #height, #width)
-    layer: str
-        name of specified layer
-
-    """
-    print("Curve analysis")
-
-    tic = time.time()
-
-    layer_activations = activations[layer]
-    curves = []
-    norms = []
-    pixel_curves = []
-    pixel_norms = []
-    rel_curves = [] 
-    rel_norms = []
-    activations_list = []
-    for video in range(layer_activations.shape[0]):
-        pixel_curve = calc_curve(pixels[video][None, ...])
-        pixel_norm = calc_norm(pixels[video][None, ...])
-        curve = calc_curve(layer_activations[video][None, ...])
-        norm = calc_norm(layer_activations[video][None, ...])
-        curves.append(curve)
-        norms.append(norm)
-        pixel_curves.append(pixel_curve)
-        pixel_norms.append(pixel_norm)
-        rel_curves.append(curve - pixel_curve)
-        rel_norms.append(norm -  pixel_norm)
-        activations_list.append(layer_activations[video][None, ...])
-    
-    df = pd.DataFrame()
-    df['curve'] = curves
-    df['pixel_curve'] = pixel_curves
-    df['rel_curve'] = rel_curves
-    df['norm'] = norms
-    df['pixel_norm'] = pixel_norms
-    df['rel_norm'] = rel_norms
-    df['video_id'] = np.array([*range(layer_activations.shape[0])]) + 1
-    df['activation'] = activations_list
-
-    toc = time.time()
-    print(f'analysis done in {toc-tic} seconds')
-
-    return df
-
-
 # ------------------- MAIN
 # Load model
 model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=True)
@@ -295,10 +211,11 @@ for batch in range(batches):
     # layer = 'blocks.4.res_blocks.2.activation'
     # activations = layer_activations(model=model, layer=layer, inputs=encoded_videos)
 
-    # Calculate curvature & norm
-    results = curve_analysis(pixels=encoded_videos, activations=activations, layer=args.layer)
-    # results = curve_analysis(pixels=encoded_videos, activations=activations, layer=layer)
-    results_df = pd.concat([results_df, results], axis=0)
+    extract_df = pd.DataFrame()
+    extract_df['activation'] = [activations[args.layer][i] for i in range(activations[args.layer].shape[0])]
+    extract_df['pixels'] = [encoded_videos[i] for i in range(encoded_videos.shape[0])]
+
+    results_df = pd.concat([results_df, extract_df], axis=0)
 
 # Save results
 # wd = arg.wd
