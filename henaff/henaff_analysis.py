@@ -1,4 +1,6 @@
 """
+Use python 3.7
+
 Code to replicate henaff curvature analysis in python. 
 Based on repository : https://github.com/olivierhenaff/neural-straightening/tree/master
 Able to replicate mean curvature measurements as given in 'acute data -combined_235x.csc' file 
@@ -25,9 +27,6 @@ from sklearn.utils import resample
 from IPython import embed as shell
 from PIL import Image
 from torchvision import transforms
-from henaff_utils import utils #doesn't work yet?
-
-shell()
 
 def comp_speed(vid_array):
     '''Compute
@@ -64,13 +63,23 @@ def comp_curvatures(vid_array):
     mean_curve = np.mean(curvs)
 
     return curvs, mean_curve
-   
+
+# Define the image transformation (Resize, Normalize, etc.)
+preprocess = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.5], std=[0.5])
+])
+
+def load_image(image_path):
+    img = Image.open(image_path).convert('L')  
+    img_tensor = preprocess(img)  # Preprocess it
+    return img_tensor.unsqueeze(0)
 
 def load_images():
 
     # Load images (n_videos x n_frames x n_channels x height x width)
     stim_dir = '/Users/annewzonneveld/Documents/phd/projects/curvature/henaff/henaff_stimuli/'
-    img_array = np.zeros((10, 11, 3, 512, 512))
+    img_array = np.zeros((10, 11, 3, 512, 512)) # or one channel?
     for video in range(10):
         vid_name = f'movie{video+1}/'
         vid_folder = stim_dir + vid_name
