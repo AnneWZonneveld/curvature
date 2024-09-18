@@ -17,6 +17,7 @@ import json
 import urllib
 import pandas as pd
 import torch 
+import psutil
 from torchvision.transforms import Compose, Lambda
 from torchvision.transforms._transforms_video import (
     CenterCropVideo,
@@ -44,6 +45,10 @@ for key, val in vars(args).items():
 	print('{:16} {}'.format(key, val))
 
 #### ----------------
+def memory_usage():
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    return mem_info.rss / (1024 * 1024)  # in MB
 
 def transform_clips(video, model_name='slow_r50'):
     """
@@ -107,10 +112,13 @@ def encode_videos(files, model_name='slow_r50'):
 
     """
 
+    print("Encoding videos")
+
     inputs = []
     for file in files:
         video =  EncodedVideo.from_path(file)
         video_data = transform_clips(video=video, model_name=model_name)
+        del video
         inputs.append(video_data['video'])
     inputs = torch.stack(inputs)
 
@@ -160,6 +168,7 @@ def layer_activations(model, layer, inputs):
     returns convoluted tensor (# of videos, # of frames, #height, #width)
 
     """
+    print("Extracting activations")
 
     # Get intermediate activations
     activations = {}
@@ -224,6 +233,8 @@ def curve_analysis(pixels, activations, layer):
 
     """
 
+    print("Peforming curve analysis")
+
     layer_activations = activations[layer]
     curves = []
     norms = []
@@ -231,7 +242,7 @@ def curve_analysis(pixels, activations, layer):
     pixel_norms = []
     rel_curves = [] 
     rel_norms = []
-    activations_list = []
+    # activations_list = []
     for video in range(layer_activations.shape[0]):
         pixel_curve = calc_curve(pixels[video][None, ...])
         pixel_norm = calc_norm(pixels[video][None, ...])
@@ -243,7 +254,7 @@ def curve_analysis(pixels, activations, layer):
         pixel_norms.append(pixel_norm)
         rel_curves.append(curve - pixel_curve)
         rel_norms.append(norm -  pixel_norm)
-        activations_list.append(layer_activations[video][None, ...])
+        # activations_list.append(layer_activations[video][None, ...])
     
     df = pd.DataFrame()
     df['curve'] = curves
@@ -253,12 +264,17 @@ def curve_analysis(pixels, activations, layer):
     df['pixel_norm'] = pixel_norms
     df['rel_norm'] = rel_norms
     df['video_id'] = np.array([*range(layer_activations.shape[0])]) + 1
-    df['activation'] = activations_list
+    # df['activation'] = activations_list
 
     return df
 
 
 # ------------------- MAIN
+# Setting and checking cache
+os.environ['TORCH_HOME'] = '/ivi/zfs/s0/original_homes/azonnev/.cache'
+print("cache log: ")
+print(os.getenv('TORCH_HOME'))
+
 # Load model
 model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=True)
 # model = torch.hub.load('facebookresearch/pytorchvideo', 'slow_r50', pretrained=True)
@@ -269,25 +285,31 @@ model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrai
 # data_dir = '/home/azonnev/data/boldmoments/stimulus_set/mp4_h264/'
 # files = sorted(glob.glob(os.path.join(data_dir, '*mp4')))
 files = sorted(glob.glob(os.path.join(args.data_dir, '*mp4')))
-batches = 19
+batches = 551
 batch_size = int(len(files)/batches)
 
 results_df = pd.DataFrame()
 for batch in range(batches):
-
+    print(f'processing batch {batch}')
     batch_files = files[int(batch*batch_size):int((batch+1)*batch_size)]
     # encoded_videos = encode_videos(model_name='slow_r50', files=files)
-    encoded_videos = encode_videos(model_name=args.model_name, files=files)
+    encoded_videos = encode_videos(model_name=args.model_name, files=batch_files)
+
+    print(f"Memory usage encoding: {memory_usage()} MB")
 
     # Get activations
-    activations = layers_activations(model=model, layers=args.layer, inputs=encoded_videos)
+    activations = layer_activations(model=model, layer=args.layer, inputs=encoded_videos)
     # layer = 'blocks.4.res_blocks.2.activation'
     # activations = layer_activations(model=model, layer=layer, inputs=encoded_videos)
+
+    print(f"Memory usage extracting: {memory_usage()} MB")
 
     # Calculate curvature & norm
     results = curve_analysis(pixels=encoded_videos, activations=activations, layer=args.layer)
     # results = curve_analysis(pixels=encoded_videos, activations=activations, layer=layer)
     results_df = pd.concat([results_df, results], axis=0)
+
+    del results
 
 # Save results
 # wd = arg.wd
