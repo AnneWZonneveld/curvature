@@ -34,8 +34,8 @@ from pytorchvideo.transforms import (
 # ------------------- Input arguments
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_name', default='slow_r50', type=str)
-parser.add_argument('--layer', default='blocks.4.res_blocks.2.activation', type=str)
-parser.add_argument('--data_split', default='train', type=str)
+parser.add_argument('--pretrained', default=1, type=int)
+parser.add_argument('--layer', default='late', type=str)
 parser.add_argument('--data_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/data/mp4_h264', type=str)
 parser.add_argument('--wd', default='/Users/annewzonneveld/Documents/phd/projects/curvature', type=str)
 args = parser.parse_args()
@@ -185,8 +185,24 @@ def layer_activations(model, layer, inputs):
 
 # ------------------- MAIN
 # Load model
-model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=True)
+model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=args.pretrained)
 # model = torch.hub.load('facebookresearch/pytorchvideo', 'slow_r50', pretrained=True)
+
+# Set to according layer (late layer)
+if args.model_name == 'slow_r50':
+    if args.layer = 'early': 
+        args.layer = '...'
+    elif args.layer ='mid':
+        args.layer = '...'
+    elif args.layer = 'late':
+        args.layer = 'blocks.4.res_blocks.2.activation'
+elif args.model_name == 'i3d_r50':
+    if args.layer = 'early': 
+        args.layer = 'blocks.1.res_blocks.2.activation'''
+    elif args.layer ='mid':
+        args.layer = 'blocks.3.res_blocks.3.activation'
+    elif args.layer = 'late'
+        args.layer = 'blocks.5.res_blocks.2.activation'
 
 # Load videos
 # data_dir = args.data_dir
@@ -221,8 +237,7 @@ for batch in range(batches):
 # wd = arg.wd
 # wd = '/Users/annewzonneveld/Documents/phd/projects/curvature'
 # wd = '/home/azonnev/analyses/curvature'
-res_folder = args.wd + f'/results/features/{args.model_name}/{args.layer}'
-# res_folder = wd + f'/results/features/slow_r50/blocks.4.res_blocks.2.activation'
+res_folder = args.wd + f'/results/features/{args.model_name}/pt_{args.pretrained}/{args.layer}'
 if not os.path.exists(res_folder) == True:
     os.makedirs(res_folder)
 

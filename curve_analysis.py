@@ -33,8 +33,8 @@ from bokeh.palettes import Turbo256
 # ------------------- Input arguments
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_name', default='slow_r50', type=str)
-parser.add_argument('--layer', default='blocks.4.res_blocks.2.activation', type=str)
-parser.add_argument('--data_split', default='train', type=str)
+parser.add_argument('--pretrained', default=1, type=int)
+parser.add_argument('--layer', default='late', type=str)
 parser.add_argument('--data_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/', type=str)
 # parser.add_argument('--wd', default='/home/azonnev/analyses/curvature', type=str)
 parser.add_argument('--wd', default='/Users/annewzonneveld/Documents/phd/projects/curvature', type=str)
@@ -62,13 +62,19 @@ sns.set_context('paper',
 def load_data(): 
     print('Loading activations')
 
-    # Set to according layer (late layer)
+    # Set to according layer  
     if args.model_name == 'slow_r50':
-        args.layer = 'blocks.4.res_blocks.2.activation'
+        if args.layer == 'late': 
+            args.layer = 'blocks.4.res_blocks.2.activation'
     elif args.model_name == 'i3d_r50':
-        args.layer = 'blocks.5.res_blocks.2.activation'
+        if args.layer = 'early': 
+            args.layer = 'blocks.1.res_blocks.2.activation'''
+        elif args.layer ='mid':
+            args.layer = 'blocks.3.res_blocks.3.activation'
+        elif args.layer = 'late'
+            args.layer = 'blocks.5.res_blocks.2.activation'
 
-    activation_dir = args.wd + f'/results/features/{args.model_name}/{args.layer}/'
+    activation_dir = args.wd + f'/results/features/{args.model_name}/pt_{args.pretrained}/{args.layer}/'
     activation_file = activation_dir + 'res_df.pkl'
 
     with open(activation_file, 'rb') as f:
@@ -100,6 +106,7 @@ def scatter_plot(df, x, y):
     plt.savefig(img_path)
     plt.clf()
 
+
 def distr_plot(df):
 
     # Reformat data
@@ -128,7 +135,7 @@ def distr_plot(df):
     sns.despine(offset=10, top=True, right=True)
     fig.tight_layout()
 
-    output_dir = args.wd + f'/results/figures/{args.model_name}/{args.layer}'
+    output_dir = args.wd + f'/results/figures/{args.model_name}/pt_{args.pretrained}/{args.layer}'
     if not os.path.exists(output_dir) == True:
         os.makedirs(output_dir)
 
@@ -173,15 +180,13 @@ def time_series_plot(df):
     sns.despine(offset=10, top=True, right=True)
     fig.tight_layout()
 
-    output_dir = args.wd + f'/results/figures/{args.model_name}/{args.layer}'
+    output_dir = args.wd + f'/results/figures/{args.model_name}/pt_{args.pretrained}/{args.layer}/'
     if not os.path.exists(output_dir) == True:
         os.makedirs(output_dir)
 
     img_path = output_dir + f'/time_series_plot.png'
     plt.savefig(img_path)
     plt.clf()
-
-
 
 def comp_speed(vid_array):
     '''Compute
