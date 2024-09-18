@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 from sklearn.utils import resample
 from IPython import embed as shell
 from scipy.stats import pearsonr, spearmanr
+import math
 import tensorflow as tf
 import tensorflow_hub as hub
 from datasets import Dataset
@@ -60,6 +61,13 @@ sns.set_context('paper',
 # ----------------------------
 def load_data(): 
     print('Loading activations')
+
+    # Set to according layer (late layer)
+    if args.model_name == 'slow_r50':
+        args.layer = 'blocks.4.res_blocks.2.activation'
+    elif args.model_name == 'i3d_r50':
+        args.layer = 'blocks.5.res_blocks.2.activation'
+
     activation_dir = args.wd + f'/results/features/{args.model_name}/{args.layer}/'
     activation_file = activation_dir + 'res_df.pkl'
 
@@ -92,383 +100,135 @@ def scatter_plot(df, x, y):
     plt.savefig(img_path)
     plt.clf()
 
+def distr_plot(df):
 
-def baseline_control(curve_data, n_samples=1000, n_control_videos=10, x1='curve', x2='norm'):
-    """
-    Based on RNC algorithm Ale
+    # Reformat data
+    df_melted = pd.melt(df, value_vars=['mean_pixel_curv', 'mean_curv'], var_name='type', value_name='curve')
 
-    curve_data: df
-        df with all relevant curvature measurement
-    n_samples: int
-        n of samples to base null distribution on 
-    n_control_videos:
-        n of control images to select
-    x1: str
-        measurement 1 to use
-    x2: stre
-        measurement 2 to use
-    """
+    # Both distr plot
+    fig, ax = plt.subplots(dpi=300) 
+    sns.histplot(data=df_melted, x='curve', hue='type', kde=True,ax=ax) 
+    ax.set_title(f'{args.model_name} {args.layer} ')
+    ax.legend(title='type', labels=['feature space', 'pixel space'])
+    sns.despine(offset=10, top=True, right=True)
+    fig.tight_layout()
 
-    n_videos = len(curve_data)
-    measurements = [x1, x2]
-
-    # Null distribution videos 2-D array of shape:
-    # (N Null distribution samples × Y Videos)
-    null_dist_vids = np.zeros((n_samples, n_control_videos), dtype=np.int32)
-    # Null distribution scores 2-D arrays of shape:
-    # (N Null distribution samples × n of measurements)
-    null_dist_select = np.zeros((n_samples, len(measurements)), dtype=np.float32)
-
-    # Create the null distribution
-    for i in tqdm(range(n_samples), desc='Null distribution samples'):
-        sample = resample(np.arange(n_videos), replace=False, n_samples=n_control_videos)
-        sample.sort()
-        null_dist_vids[i] = sample
-        for r in range(len(measurements)):
-            measurement = measurements[r]
-            null_dist_select[i,r] = np.mean(curve_data[measurement].iloc[sample])
-        del sample
-    
-    # Select the video sample closest to the selection split null distribution mean,
-    # and use its score as the univariate RNC baseline
-    baseline_score_select = np.zeros((len(measurements)))
-    for r in range(len(measurements)):
-        null_dist_mean = np.mean(null_dist_select[:,r])
-        idx = np.argsort(abs(null_dist_select[:,r] - null_dist_mean))[0]
-        baseline_score_select[r] = null_dist_select[idx,r]
-    
-    return baseline_score_select
-
-def control_videos(curve_data, n_samples=1000, n_control_videos=10, x1='curve', x2='norm', margin=0.05):
-    """
-    Based on RNC algorithm Ale
-
-    curve_data: df
-        df with all relevant curvature measurement
-    n_samples: int
-        n of samples to base null distribution on 
-    n_control_videos:
-        n of control images to select
-    x1: str
-        measurement 1 to use
-    x2: stre
-        measurement 2 to use
-    """
-
-    baseline_score_select = baseline_control(curve_data=curve_data, n_samples=n_samples, n_control_videos=n_control_videos, x1=x1, x2=x2)
-
-    # Select the top N videos that align the two measurements: 
-    # i.e., that lead both high values or both low values
-    measure_sum = np.array(curve_data[x1] + curve_data[x2])
-
-    # High / high corner
-    high_1_high_2 = np.argsort(measure_sum)[::-1]
-
-    # Ignore images conditions with univariate responses below the baseline scores
-    # (plus a margin)
-    idx_bad_x1 = curve_data[x1][high_1_high_2] < (baseline_score_select[0] + margin)
-    idx_bad_x2 = curve_data[x2][high_1_high_2] < (baseline_score_select[1] + margin)
-    idx_bad = np.where(idx_bad_x1 + idx_bad_x2)[0]
-    high_1_high_2 = np.delete(np.array(high_1_high_2), idx_bad, axis=0)[:n_control_videos]
-
-    # Low / low corner
-    low_1_low_2 = np.argsort(measure_sum)
-
-    # Ignore images conditions with univariate responses below the baseline scores
-    # (minus a margin)
-    idx_bad_x1 = curve_data[x1][low_1_low_2] > (baseline_score_select[0] + margin)
-    idx_bad_x2 = curve_data[x2][low_1_low_2] > (baseline_score_select[1] + margin)
-    idx_bad = np.where(idx_bad_x1 + idx_bad_x2)[0]
-    low_1_low_2 = np.delete(np.array(low_1_low_2), idx_bad)[:n_control_videos]
-
-    # Select the top N videos that differentiate the two measurements:
-    # i.e., that lead to one measurement with high and the other one with low values
-    measure_diff = curve_data[x1] - curve_data[x2]
-
-    # High / low corner
-    high_1_low_2 = np.argsort(measure_diff)[::-1]
-    # Ignore images conditions with responses below (x1) or above
-    # (x2) the baseline scores (plus/minus a margin)
-    idx_bad_x1 = curve_data[x1][high_1_low_2] < (baseline_score_select[0] + margin)
-    idx_bad_x2 = curve_data[x2][high_1_low_2] > (baseline_score_select[1] - margin)
-    idx_bad = np.where(idx_bad_x1 + idx_bad_x2)[0]
-    high_1_low_2 = np.delete(np.array(high_1_low_2), idx_bad)[:n_control_videos]
-
-    # Low / high corner
-    low_1_high_2 = np.argsort(measure_diff)
-    # Ignore images conditions with responses above (x1) or below
-    # (x2) the baseline scores (plus/minus a margin)
-    idx_bad_x1 = curve_data[x1][low_1_high_2] > (baseline_score_select[0] - margin)
-    idx_bad_x2 = curve_data[x2][low_1_high_2] < (baseline_score_select[1] + margin)
-    idx_bad = np.where(idx_bad_x1 + idx_bad_x2)[0]
-    low_1_high_2 = np.delete(np.array(low_1_high_2), idx_bad)[:n_control_videos]
-
-    final_idx = {}
-    final_idx['h1-h2'] = high_1_high_2
-    final_idx['l1-l2'] = low_1_low_2
-    final_idx['h1-l2'] = high_1_low_2
-    final_idx['l1-h2'] = low_1_high_2
-
-    return final_idx, baseline_score_select
-
-def scatter_control(curve_data, n_samples=1000, n_control_videos=10, x1='curve', x2='norm'):
- 
-    outlier_idx, baselines = control_videos(curve_data=curve_data, n_samples=n_samples, n_control_videos=n_control_videos, x1=x1, x2=x2)
-    high_1_high_2 = curve_data.iloc[outlier_idx['h1-h2']]
-    low_1_low_2 = curve_data.iloc[outlier_idx['l1-l2']]
-    high_1_low_2 = curve_data.iloc[outlier_idx['h1-l2']] #empty
-    low_1_high_2 = curve_data.iloc[outlier_idx['l1-h2']] #empty
-
-    # Plot parameters
-    fontsize = 15
-    plt.rcParams['font.sans-serif'] = 'DejaVu Sans'
-    plt.rcParams['font.size'] = fontsize
-    plt.rc('xtick', labelsize=fontsize)
-    plt.rc('ytick', labelsize=fontsize)
-    plt.rcParams['axes.linewidth'] = 2
-    plt.rcParams['xtick.major.width'] = 2
-    plt.rcParams['xtick.major.size'] = 3
-    plt.rcParams['ytick.major.width'] = 2
-    plt.rcParams['ytick.major.size'] = 3
-    plt.rcParams['axes.spines.left'] = True
-    plt.rcParams['axes.spines.bottom'] = True
-    plt.rcParams['axes.spines.right'] = False
-    plt.rcParams['axes.spines.top'] = False
-    plt.rcParams['lines.markersize'] = 3
-    colors = [(4/255, 178/255, 153/255), (130/255, 201/255, 240/255),
-        (217/255, 214/255, 111/255), (214/255, 83/255, 117/255)]
-
-    max_x1 = np.max(curve_data[x1])
-    min_x1 = np.min(curve_data[x1])
-    max_x2 = np.max(curve_data[x2])
-    min_x2 = np.min(curve_data[x2])
-    x1_upper = round(1.2 * max_x1)
-    x1_lower = round(0.8 * min_x1)
-    x2_upper = round(1.2 * max_x2)
-    x2_lower = round(0.8 * min_x2)
-
-    fig, ax = plt.subplots(dpi=300)
-    # # Diagonal dashed line
-    # plt.plot(np.arange(x1_lower,x1_upper), np.arange(x2_lower, x2_upper), '--k', linewidth=2, alpha=.4, label='_nolegend_')
-    # Null distribution dashed lines
-    # plt.plot([baselines[0], baselines[0]], [x1_lower, x1_upper], '--w', linewidth=2, alpha=.6, label='_nolegend_')
-    # plt.plot([x2_lower, x2_upper], [baselines[1], baselines[1]], '--w', linewidth=2, alpha=.6, label='_nolegend_')
-    # Scatter plot of all images
-    plt.scatter(curve_data[x1], curve_data[x2], c='w', alpha=.1, edgecolors='k', label='_nolegend_')
-
-    # Highlight outliers
-    plt.scatter(high_1_high_2[x1], high_1_high_2[x2], color=colors[0], alpha=0.8)
-    plt.scatter(low_1_low_2[x1], low_1_low_2[x2], color=colors[1], alpha=0.8)
-    plt.scatter(high_1_low_2[x1], high_1_low_2[x2], color=colors[2], alpha=0.8)
-    plt.scatter(low_1_high_2[x1], low_1_high_2[x2], color=colors[3], alpha=0.8)
-
-    # Guiding lines
-    plt.axhline(y=baselines[1], alpha=.6, color='gray', linestyle = '--')
-    plt.axvline(x=baselines[0], alpha=.6, color='gray', linestyle = '--')
-
-    plt.ylabel(f'{x2}', fontsize=fontsize)
-    plt.xlabel(f'{x1}', fontsize=fontsize)
-    
     output_dir = args.wd + f'/results/figures/{args.model_name}/{args.layer}'
     if not os.path.exists(output_dir) == True:
         os.makedirs(output_dir)
 
-    img_path = output_dir + f'/scatter_control.png'
+    img_path = output_dir + f'/distr_plot.png'
     plt.savefig(img_path)
     plt.clf()
 
-def freq_controls(control_df, x1, x2):
-    
-    # Create a figure and a 2x2 grid of subplots
-    fig, axes = plt.subplots(2, 2, figsize=(30, 20), dpi=300)
-    axes = axes.flatten()
+    # Rel plot
+    fig, ax = plt.subplots(dpi=300) 
+    sns.histplot(data=df, x='rel_curve', kde=True,ax=ax) 
+    ax.set_title(f'Rel curve {args.model_name} {args.layer} ')
+    sns.despine(offset=10, top=True, right=True)
+    fig.tight_layout()
 
-    # Iterate over each corner type and the corresponding subplot axis
-    for i, corner in enumerate(corners):
-
-        if corner == 'h1-h2':
-            title = f'h {x1} - h {x2}'
-        elif corner == 'l1-l2':
-            title = f'l {x1} - l {x2}'
-        elif corner == 'h1-l2':
-            title = f'h {x1} - l { x2}'
-        elif corner == 'l1-h2':
-            title = f'l {x1} - h {x2}'
-
-        # Filter data for the current corner type
-        data = control_df[control_df['corner'] == corner]
-        actions = [item for sublist in data['actions'] for item in sublist]
-
-        # Count the occurrences of each action
-        action_counts = pd.Series(actions).value_counts()
-        
-        # Plot the bar chart
-        axes[i].bar(action_counts.index, action_counts.values, color='skyblue', edgecolor='black')
-
-        # # Plot a frequency distribution (histogram) of the 'actions' column
-        # axes[i].hist(actions)
-        
-        # Set titles and labels
-        axes[i].set_title(f"{title}", fontsize=15)
-        axes[i].set_xlabel('Actions', fontsize=12)
-        axes[i].set_ylabel('Frequency', fontsize=12)
-        axes[i].tick_params(axis='x', rotation=90, size=5)
-
-    # Adjust layout to prevent overlapping of subplots
-    plt.tight_layout()
-
-    # Save the plot if needed
     output_dir = args.wd + f'/results/figures/{args.model_name}/{args.layer}'
-    if not os.path.exists(output_dir):
+    if not os.path.exists(output_dir) == True:
         os.makedirs(output_dir)
-    img_path = output_dir + f'/freq_controls_{x1}_{x2}.png'
+
+    img_path = output_dir + f'/rel_distr_plot.png'
     plt.savefig(img_path)
+    plt.clf()
 
 
-def cluster_control(curve_data, x1='curve', x2='norm'):
+def time_series_plot(df):
 
-    with open(os.path.join(args.data_dir, "data", "annotations.json"), 'r') as f:
-        metadata = json.load(f)
+    # Reformat data
+    n_videos = len(df)
+    n_curvs = df['all_curvs'].iloc[0].shape[0]
+    vid_id = np.repeat(np.array([*range(len(df))]) + 1, n_curvs)
+    curv_id = [*range(n_curvs)] * len(df)
+    curves = [item for sublist in df['all_curvs'] for item in sublist]
     
-    module_url = "https://tfhub.dev/google/universal-sentence-encoder/4"
-    language_model = hub.load(module_url)
-    
-    def embed(input):
-        return language_model(input)
+    rf_df = pd.DataFrame()
+    rf_df['vid_id'] = vid_id
+    rf_df['curv_id'] = curv_id
+    rf_df['curve'] = curves
 
-    # Load hugging face dataset for FAISS
-    all_actions = []
-    for video in range(len(curve_data)):
-        id = video + 1
-        id = format(id, "04")
-        actions = metadata[id]['actions']
-        unique_actions = np.unique(actions)
-        for action in unique_actions:
-            all_actions.append(action)
-    all_actions = np.unique(all_actions)
-        
-    ds_dict = {'labels': all_actions}
-    ds = Dataset.from_dict(ds_dict)
-    embeddings_ds = ds.map(
-        lambda x: {"embeddings": embed([x['labels']]).numpy()[0]}
-    )
-    embeddings_ds.add_faiss_index(column='embeddings')
+    # Plot
+    fig, ax = plt.subplots(dpi=500)
+    sns.boxplot(data=rf_df, x='curv_id', y='curve', ax=ax, width = 0.3)
+    # sns.stripplot(data=rf_df, x='curv_id', y='curve', hue='vid_id', ax=ax, 
+    #             dodge=True, jitter=True, palette='husl', alpha=0.7, size=5)
 
-    # Find average label for all videos
-    labels = []
-    for video in range(len(curve_data)):
-        id = video + 1
-        id = format(id, "04")
-        actions = metadata[id]['actions']
-        embeddings = np.zeros((len(actions), 512))
-        for i in range(len(actions)):
-            # extract embedding
-            embeddings[i, :] = language_model([actions[i]])
-        avg_embedding = np.mean(embeddings, axis=0)
-        scores, samples = embeddings_ds.get_nearest_examples("embeddings", avg_embedding, k=1)
-        labels.append(samples['labels'][0])
+    # Plot transparent lines connecting individual measurements across timepoints
+    for vid_id in rf_df['vid_id'].unique():
+        individual_data = rf_df[rf_df['vid_id'] == vid_id]
+        plt.plot(individual_data['curv_id'], individual_data['curve'], 
+                color='gray', alpha=0.2, linewidth=1, zorder=1)
 
-    curve_data['label'] = labels
-    
-    # Make interactive plot
-    prep_dict = {
-        f'{x1}': np.array(curve_data[x1]),
-        f'{x2}': np.array(curve_data[x2]),
-        'label': np.array(curve_data['label']),
-        'id': np.array([*range(len(curve_data))])+ 1}
-    prep_data = ColumnDataSource(data=prep_dict)
+    # Customize labels and title
+    ax.set_title('Curve over time')
+    ax.set_xlabel('time')
+    ax.set_ylabel('curve')
 
-    # Evenly spaced colour palette
-    indices = np.linspace(0, len(Turbo256) - 1, len(np.unique(labels))).astype(int) #185 unique labels
-    palette = [Turbo256[i] for i in indices]
-
-    shell()
-
-    cluster_plot = bp.figure(title=f"{x1} - {x2} clusters",
-    tools="pan,wheel_zoom,box_zoom,reset,hover",
-    x_axis_label=f'{x1}',
-    y_axis_label=f'{x2}',
-    x_axis_type='linear',   
-    y_axis_type='linear',   
-    min_border=1)
-    color_mapper = CategoricalColorMapper(factors=np.unique(labels), palette=palette) 
-    cluster_plot.scatter(x=f'{x1}', y=f'{x2}', source=prep_data, color={'field': 'label', 'transform': color_mapper})
-    hover = cluster_plot.select(dict(type=HoverTool))
-    hover.tooltips = [
-    ("Action", "@label"), 
-    ("ID", "@id")]
-
-    cluster_plot.xaxis.major_label_orientation = "vertical" 
-    cluster_plot.xaxis.axis_label_text_font_size = "12pt"
-    cluster_plot.yaxis.axis_label_text_font_size = "12pt"
-    cluster_plot.axis.minor_tick_line_color = None  
+    # # Optional: remove legend for 'measurement'
+    # ax.legend_.remove()
+    sns.despine(offset=10, top=True, right=True)
+    fig.tight_layout()
 
     output_dir = args.wd + f'/results/figures/{args.model_name}/{args.layer}'
-    if not os.path.exists(output_dir):
+    if not os.path.exists(output_dir) == True:
         os.makedirs(output_dir)
-    file_path = output_dir + f'/cluster_{x1}_{x2}.html'
-    bp.output_file(filename=file_path)
-    bp.save(cluster_plot)
+
+    img_path = output_dir + f'/time_series_plot.png'
+    plt.savefig(img_path)
+    plt.clf()
 
 
-def asses_control(curve_data, n_samples=1000, n_control_videos=25, x1='curve', x2='norm'):
 
-    with open(os.path.join(args.data_dir, "data", "annotations.json"), 'r') as f:
-        metadata = json.load(f)
+def comp_speed(vid_array):
+    '''Compute
+    - velocity = difference vectors
+    - norm of difference vectors
+    for specificied sequence of images'''
 
-    control_idx, baseline = control_videos(curve_data=curve_data, n_samples=1000, n_control_videos=25, x1='curve', x2='norm')
+    # vid_array = img_array[0, :, :, :, :]
+    num_frames = vid_array.shape[1]
+    dif_vectors = [vid_array[:, i , :, :].flatten() -  vid_array[:, i + 1 , :, :].flatten().flatten() for i in range(num_frames-1)]
+    dif_vectors =  np.vstack(tuple(dif_vectors))
+    norms = np.zeros(num_frames - 1)
 
-    df = pd.DataFrame()
-    all_corners = []
-    all_actions = []
-    all_descr = []
-    all_ids = []
-
-    corners = ['h1-h2', 'l1-l2', 'h1-l2', 'l1-h2']
-    for corner in corners:
-        idx = control_idx[corner]
-        for id in idx:
-            id = format(id, "04")
-            all_actions.append(metadata[id]['actions'])
-            all_descr.append(metadata[id]['text_descriptions'])
-            all_corners.append(corner)
-            all_ids.append(id)
+    for i in range(num_frames - 1):
+        norms[i] = np.linalg.norm(dif_vectors[i]) + 1e-8  # Compute the norm (magnitude) of each difference vector
+        dif_vectors[i] /= norms[i]  # Normalize the difference vector
     
-    df['corner'] = all_corners
-    df['actions'] = all_actions
-    df['descr'] = all_descr
-    df['id'] = all_ids
+    return dif_vectors, norms
 
-    freq_controls(control_df=df, x1=x1, x2=x2)
+def comp_curvatures(vid_array):
+    """ Compute curvatures based on angles of velocity vectors. """
+    num_frames = vid_array.shape[1]
+    dif_vectors, norms = comp_speed(vid_array)
 
-def calc_norm(activation):
-    num_frames = activation.shape[1]
-    vectors = [activation[:, i, :, :].flatten() -  activation[:, i + 1, :, :].flatten() for i in range(num_frames-1)]
-    norms = [np.linalg.norm(vectors[i]) for i in range(len(vectors))]
-    norm = np.mean(norms)
+    curvs = np.zeros(num_frames - 2)
+    angles = np.zeros(num_frames - 2)
+    for i in range(num_frames - 2):
+        cos = np.clip(np.dot(dif_vectors[i], dif_vectors[i+1]), -1, 1)
+        angles[i] = math.acos(cos)
+        curvs[i] = math.degrees(math.acos(cos)) #angle in degrees
+    
+    # mean_curve_angle = sum(angles) * 180 / (len(angles)*math.pi)
 
-    return norm
+    mean_curve = np.mean(curvs)
+    mean_norm = np.mean(norms)
 
-def calc_curve(activation):
-    """
-    Version based on Henaff 2021
-    """
-
-    num_frames = activation.shape[1]
-    vectors = [(activation[:, i, :, :].flatten() -  activation[:, i + 1, :, :].flatten()) 
-    / np.linalg.norm(activation[:, i, :, :].flatten() - activation[:, i + 1, :, :].flatten()) for i in range(num_frames-1)]
-    curves = [np.arccos(np.dot(vectors[i], vectors[i+1])) for i in range(len(vectors)-1)]
-    curve = np.mean(curves) if curves else 0
-    curve = np.degrees(curve)
-
-    return curve
+    return curvs, mean_curve, norms, mean_norm
 
 def calc_lse(activation):
     """
     Calculate least squared error between actualy temporal trajectory 
     and shortest straight interpolated trajectory.
+
+    Not yet adjusted for new data structure
     """
 
+    activation = np.array(activation)
     num_timepoints = activation.shape[1]
     start_rep = activation[:, 0, :, :]
     end_rep =  activation[:, -1, :, :]
@@ -489,6 +249,10 @@ def calc_lse(activation):
 
 def calc_deviation(activation):
 
+    """
+    Not yet adjusted for new data structure
+    """
+
     num_frames = activation.shape[1]
     vectors = [(activation[:, i, :, :].flatten() -  activation[:, i + 1, :, :].flatten()) 
     / np.linalg.norm(activation[:, i, :, :].flatten() - activation[:, i + 1, :, :].flatten()) for i in range(num_frames-1)]
@@ -500,79 +264,121 @@ def calc_deviation(activation):
     norms = np.linalg.norm(deviations, axis=1)
     # Not done yet
 
-
 def calc_properties(activation_data):
     """
     Calculate geometric properties for pixel and feature space as
     specified for further analysis.
     """
+
+    mean_curvs = []
+    all_curvs = []
+    mean_norms = []
+    all_norms = []
+    mean_pixel_curvs = []
+    all_pixel_curvs = []
+    mean_pixel_norms = []
+    all_pixel_norms = []
+    rel_curves = [] 
+    rel_norms = []
+
+    for video in range(len(activation_data)):
+        if video % 100 == 0:
+            print(f'Calculating properties for video {video} ')
+
+        activation = activation_data['activation'].iloc[video].numpy()
+        pixels = activation_data['pixels'].iloc[video].numpy()
+        
+        # Calculate properties for feature space
+        curvs, mean_curv, norms, mean_norm = comp_curvatures(activation)
+        mean_curvs.append(mean_curv)
+        all_curvs.append(curvs)
+        mean_norms.append(mean_norm)
+        all_norms.append(norms)
+
+        # Calculate properties for pixel space
+        pixel_curvs, mean_pixel_curv, pixel_norms, mean_pixel_norm = comp_curvatures(pixels)
+        mean_pixel_curvs.append(mean_pixel_curv)
+        all_pixel_curvs.append(pixel_curvs)
+        mean_pixel_norms.append(mean_pixel_norm)
+        all_pixel_norms.append(pixel_norms)
+        
+        # Compute relative curve / norm
+        rel_curve = mean_curv - mean_pixel_curv
+        rel_norm = mean_norm -  mean_pixel_norm
+        rel_curves.append(rel_curve)
+        rel_norms.append(rel_norm)
+
+    activation_data['all_curvs'] = all_curvs
+    activation_data['mean_curv'] = mean_curvs
+    activation_data['all_norms'] = all_norms
+    activation_data['mean_norm'] = mean_norms
+    activation_data['all_pixel_curvs'] = all_pixel_curvs
+    activation_data['mean_pixel_curv'] = mean_pixel_curvs
+    activation_data['all_pixel_norms'] = all_pixel_norms
+    activation_data['mean_pixel_norm'] = mean_pixel_norms
+    activation_data['rel_curve'] = rel_curves
+    activation_data['rel_norm'] = rel_norms
     
+    return activation_data
+
+
+def static_control(activation_data): 
+    """
+    Not yet adjusted for new data structure
+    """
+
     curves = []
     norms = []
     lses = []
     pixel_curves = []
     pixel_norms = []
     pixel_lses = []
-    rel_curves = [] 
-    rel_norms = []
-    rel_lses = []
-    # deviations = []
 
     for video in range(len(activation_data)):
-        activation = activation_data['activation'].iloc[video].numpy()
-        pixels = activation_data['pixels'].iloc[video].numpy()
+        first_t = activation_data['activation'].iloc[video][:, 0, :, :].unsqueeze(1)
+        first_t_pixel = activation_data['pixels'].iloc[video][:, 0, :, :].unsqueeze(1)
 
-        curve = calc_curve(activation)
-        norm = calc_norm(activation)
-        lse = calc_lse(activation)
+        static_activation = first_t.repeat(1, 8, 1, 1)
+        static_pixel = first_t_pixel.repeat(1, 8, 1, 1)
 
-        pixel_curve = calc_curve(pixels)
-        pixel_norm = calc_norm(pixels)
-        pixel_lse = calc_lse(pixels)
+        curve = calc_curve(static_activation)
+        norm = calc_norm(static_activation)
+        lse = calc_lse(static_activation)
 
-        rel_curve = curve - pixel_curve
-        rel_norm = norm -  pixel_norm
-        rel_lse = lse - pixel_lse
-
+        pixel_curve =  calc_curve(static_pixel)
+        pixel_norm =  calc_norm(static_pixel)
+        pixel_lse = calc_lse(static_pixel)
+    
         curves.append(curve)
         norms.append(norm)
         lses.append(lse)
         pixel_curves.append(pixel_curve)
         pixel_norms.append(pixel_norm)
         pixel_lses.append(pixel_lse)
-        rel_curves.append(rel_curve)
-        rel_norms.append(rel_norm)
-        rel_lses.append(rel_lse)
-        # deviations.append(calc_deviation(activation))
 
-    activation_data['curve'] = curves
-    activation_data['norm'] = norms
-    activation_data['lse'] = lses
-    activation_data['pixel_curve'] = pixel_curves
-    activation_data['pixel_norm'] = pixel_norms
-    activation_data['pixel_lse'] = pixel_lses
-    activation_data['rel_curve'] = rel_curves
-    activation_data['rel_norm'] = rel_norms
-    activation_data['rel_lse'] = rel_lses
-
-    return activation_data
-
-
+    shell()
+    if sum(curves) + sum(norms) + sum(lses) == 0:
+        print("Static control: no changes in representational feature space model")
+    if sum(pixel_curves) + sum(pixel_norms) + sum(pixel_lses) == 0: 
+        print("Static control: no changes in pixel space")
 
 # ------------------ MAIN
 activation_data = load_data()
 activation_data = activation_data.reset_index()   
-# curve_data = second_order_stats(curve_data=curve_data)
-curve_data = calc_properties(activation_data=activation_data)
 
-shell()
+# static_control(activation_data)
+curve_data = calc_properties(activation_data=activation_data)
 
 # Plot relationships variables of interest 
 scatter_plot(df=curve_data, x='curve', y='norm')
 scatter_plot(df=curve_data, x='lse', y='norm')
+scatter_plot(df=curve_data, x='curve', y='lse')
 scatter_plot(df=curve_data, x='pixel_curve', y='pixel_norm')
 scatter_plot(df=curve_data, x='pixel_lse', y='pixel_norm')
+scatter_plot(df=curve_data, x='pixel_curve', y='pixel_lse')
 scatter_plot(df=curve_data, x='rel_curve', y='norm')
+scatter_plot(df=curve_data, x='rel_lse', y='norm')
+
 
 # Qualitative inspections
 # scatter_control(curve_data=curve_data, n_samples=1000, n_control_videos=25, x1='curve', x2='norm')
