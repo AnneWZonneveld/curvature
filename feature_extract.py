@@ -34,7 +34,7 @@ from pytorchvideo.transforms import (
 
 # ------------------- Input arguments
 parser = argparse.ArgumentParser()
-parser.add_argument('--model_name', default='slow_r50', type=str)
+parser.add_argument('--model_name', default='i3d_r50', type=str)
 parser.add_argument('--pretrained', default=1, type=int)
 parser.add_argument('--layer', default='late', type=str)
 parser.add_argument('--data_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/data/mp4_h264', type=str)
@@ -46,10 +46,6 @@ for key, val in vars(args).items():
 	print('{:16} {}'.format(key, val))
 
 #### ----------------
-def memory_usage():
-    process = psutil.Process(os.getpid())
-    mem_info = process.memory_info()
-    return mem_info.rss / (1024 * 1024)  # in MB
 
 def transform_clips(video, model_name='slow_r50'):
     """
@@ -92,9 +88,9 @@ def transform_clips(video, model_name='slow_r50'):
     clip_duration = (num_frames * sampling_rate)/frames_per_second
 
     # Get clip and transform
-    clip_start_sec = 0.0 
-    clip_duration = 3.0 
-    video_data = video.get_clip(start_sec=clip_start_sec, end_sec=clip_start_sec + clip_duration) 
+    start_sec = 0.0 
+    end_sec = start_sec + clip_duration
+    video_data = video.get_clip(start_sec=start_sec, end_sec=end_sec) 
     video_data= transform(video_data)
 
     return video_data
@@ -199,29 +195,24 @@ print(os.getenv('TORCH_HOME'))
 
 # Load model
 model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=args.pretrained)
-# model = torch.hub.load('facebookresearch/pytorchvideo', 'slow_r50', pretrained=True)
 
-# Set to according layer (late layer)
+# Set to according layer 
 if args.model_name == 'slow_r50':
-    if args.layer = 'early': 
+    if args.layer == 'early': 
         args.layer = '...'
-    elif args.layer ='mid':
+    elif args.layer == 'mid':
         args.layer = '...'
-    elif args.layer = 'late':
+    elif args.layer == 'late':
         args.layer = 'blocks.4.res_blocks.2.activation'
 elif args.model_name == 'i3d_r50':
-    if args.layer = 'early': 
+    if args.layer == 'early': 
         args.layer = 'blocks.1.res_blocks.2.activation'''
-    elif args.layer ='mid':
+    elif args.layer == 'mid':
         args.layer = 'blocks.3.res_blocks.3.activation'
-    elif args.layer = 'late'
+    elif args.layer == 'late':
         args.layer = 'blocks.5.res_blocks.2.activation'
 
 # Load videos
-# data_dir = args.data_dir
-# data_dir = '/Users/annewzonneveld/Documents/phd/projects/curvature/test_data/'
-# data_dir = '/home/azonnev/data/boldmoments/stimulus_set/mp4_h264/'
-# files = sorted(glob.glob(os.path.join(data_dir, '*mp4')))
 files = sorted(glob.glob(os.path.join(args.data_dir, '*mp4')))
 batches = 551
 batch_size = int(len(files)/batches)
@@ -231,14 +222,12 @@ for batch in range(batches):
 
     print(f"Processing batch {batch}")
 
+    # Encode batch of videos
     batch_files = files[int(batch*batch_size):int((batch+1)*batch_size)]
-    # encoded_videos = encode_videos(model_name='slow_r50', files=files)
     encoded_videos = encode_videos(model_name=args.model_name, files=batch_files)
 
     # Get activations
     activations = layer_activations(model=model, layer=args.layer, inputs=encoded_videos)
-    # layer = 'blocks.4.res_blocks.2.activation'
-    # activations = layer_activations(model=model, layer=layer, inputs=encoded_videos)
 
     extract_df = pd.DataFrame()
     extract_df['activation'] = [activations[args.layer][i] for i in range(activations[args.layer].shape[0])]
@@ -249,9 +238,6 @@ for batch in range(batches):
     del results
 
 # Save results
-# wd = arg.wd
-# wd = '/Users/annewzonneveld/Documents/phd/projects/curvature'
-# wd = '/home/azonnev/analyses/curvature'
 res_folder = args.wd + f'/results/features/{args.model_name}/pt_{args.pretrained}/{args.layer}'
 if not os.path.exists(res_folder) == True:
     os.makedirs(res_folder)

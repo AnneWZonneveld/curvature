@@ -32,7 +32,7 @@ from bokeh.palettes import Turbo256
 
 # ------------------- Input arguments
 parser = argparse.ArgumentParser()
-parser.add_argument('--model_name', default='slow_r50', type=str)
+parser.add_argument('--model_name', default='i3d_r50', type=str)
 parser.add_argument('--pretrained', default=1, type=int)
 parser.add_argument('--layer', default='late', type=str)
 parser.add_argument('--data_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/', type=str)
@@ -67,11 +67,11 @@ def load_data():
         if args.layer == 'late': 
             args.layer = 'blocks.4.res_blocks.2.activation'
     elif args.model_name == 'i3d_r50':
-        if args.layer = 'early': 
+        if args.layer == 'early': 
             args.layer = 'blocks.1.res_blocks.2.activation'''
-        elif args.layer ='mid':
+        elif args.layer == 'mid':
             args.layer = 'blocks.3.res_blocks.3.activation'
-        elif args.layer = 'late'
+        elif args.layer == 'late':
             args.layer = 'blocks.5.res_blocks.2.activation'
 
     activation_dir = args.wd + f'/results/features/{args.model_name}/pt_{args.pretrained}/{args.layer}/'
@@ -82,111 +82,6 @@ def load_data():
     
     return activation_data
 
-def scatter_plot(df, x, y):
-
-    # Test correlation
-    res = spearmanr(df[x], df[y])
-    stat = round(res[0], 4)
-    p_val = round(res[1], 4)
-
-    # Plot
-    fig, ax = plt.subplots(dpi=300)
-    sns.scatterplot(data=df, x=x, y=y)
-    ax.set_title(f'{args.model_name} {args.layer}''\n'f'spearman: {stat}, p: {p_val}')
-    ax.set_xlabel(x)
-    ax.set_ylabel(y)
-    sns.despine(offset= 10, top=True, right=True)
-    fig.tight_layout()
-
-    output_dir = args.wd + f'/results/figures/{args.model_name}/{args.layer}'
-    if not os.path.exists(output_dir) == True:
-        os.makedirs(output_dir)
-
-    img_path = output_dir + f'/scatter_{x}_{y}.png'
-    plt.savefig(img_path)
-    plt.clf()
-
-
-def distr_plot(df):
-
-    # Reformat data
-    df_melted = pd.melt(df, value_vars=['mean_pixel_curv', 'mean_curv'], var_name='type', value_name='curve')
-
-    # Both distr plot
-    fig, ax = plt.subplots(dpi=300) 
-    sns.histplot(data=df_melted, x='curve', hue='type', kde=True,ax=ax) 
-    ax.set_title(f'{args.model_name} {args.layer} ')
-    ax.legend(title='type', labels=['feature space', 'pixel space'])
-    sns.despine(offset=10, top=True, right=True)
-    fig.tight_layout()
-
-    output_dir = args.wd + f'/results/figures/{args.model_name}/{args.layer}'
-    if not os.path.exists(output_dir) == True:
-        os.makedirs(output_dir)
-
-    img_path = output_dir + f'/distr_plot.png'
-    plt.savefig(img_path)
-    plt.clf()
-
-    # Rel plot
-    fig, ax = plt.subplots(dpi=300) 
-    sns.histplot(data=df, x='rel_curve', kde=True,ax=ax) 
-    ax.set_title(f'Rel curve {args.model_name} {args.layer} ')
-    sns.despine(offset=10, top=True, right=True)
-    fig.tight_layout()
-
-    output_dir = args.wd + f'/results/figures/{args.model_name}/pt_{args.pretrained}/{args.layer}'
-    if not os.path.exists(output_dir) == True:
-        os.makedirs(output_dir)
-
-    img_path = output_dir + f'/rel_distr_plot.png'
-    plt.savefig(img_path)
-    plt.clf()
-
-
-def time_series_plot(df):
-
-    # Reformat data
-    n_videos = len(df)
-    n_curvs = df['all_curvs'].iloc[0].shape[0]
-    vid_id = np.repeat(np.array([*range(len(df))]) + 1, n_curvs)
-    curv_id = [*range(n_curvs)] * len(df)
-    curves = [item for sublist in df['all_curvs'] for item in sublist]
-    
-    rf_df = pd.DataFrame()
-    rf_df['vid_id'] = vid_id
-    rf_df['curv_id'] = curv_id
-    rf_df['curve'] = curves
-
-    # Plot
-    fig, ax = plt.subplots(dpi=500)
-    sns.boxplot(data=rf_df, x='curv_id', y='curve', ax=ax, width = 0.3)
-    # sns.stripplot(data=rf_df, x='curv_id', y='curve', hue='vid_id', ax=ax, 
-    #             dodge=True, jitter=True, palette='husl', alpha=0.7, size=5)
-
-    # Plot transparent lines connecting individual measurements across timepoints
-    for vid_id in rf_df['vid_id'].unique():
-        individual_data = rf_df[rf_df['vid_id'] == vid_id]
-        plt.plot(individual_data['curv_id'], individual_data['curve'], 
-                color='gray', alpha=0.2, linewidth=1, zorder=1)
-
-    # Customize labels and title
-    ax.set_title('Curve over time')
-    ax.set_xlabel('time')
-    ax.set_ylabel('curve')
-
-    # # Optional: remove legend for 'measurement'
-    # ax.legend_.remove()
-    sns.despine(offset=10, top=True, right=True)
-    fig.tight_layout()
-
-    output_dir = args.wd + f'/results/figures/{args.model_name}/pt_{args.pretrained}/{args.layer}/'
-    if not os.path.exists(output_dir) == True:
-        os.makedirs(output_dir)
-
-    img_path = output_dir + f'/time_series_plot.png'
-    plt.savefig(img_path)
-    plt.clf()
 
 def comp_speed(vid_array):
     '''Compute
@@ -275,6 +170,7 @@ def calc_properties(activation_data):
     specified for further analysis.
     """
 
+    curve_data = pd.DataFrame()
     mean_curvs = []
     all_curvs = []
     mean_norms = []
@@ -313,18 +209,27 @@ def calc_properties(activation_data):
         rel_curves.append(rel_curve)
         rel_norms.append(rel_norm)
 
-    activation_data['all_curvs'] = all_curvs
-    activation_data['mean_curv'] = mean_curvs
-    activation_data['all_norms'] = all_norms
-    activation_data['mean_norm'] = mean_norms
-    activation_data['all_pixel_curvs'] = all_pixel_curvs
-    activation_data['mean_pixel_curv'] = mean_pixel_curvs
-    activation_data['all_pixel_norms'] = all_pixel_norms
-    activation_data['mean_pixel_norm'] = mean_pixel_norms
-    activation_data['rel_curve'] = rel_curves
-    activation_data['rel_norm'] = rel_norms
+    curve_data['all_curvs'] = all_curvs
+    curve_data['mean_curv'] = mean_curvs
+    curve_data['all_norms'] = all_norms
+    curve_data['mean_norm'] = mean_norms
+    curve_data['all_pixel_curvs'] = all_pixel_curvs
+    curve_data['mean_pixel_curv'] = mean_pixel_curvs
+    curve_data['all_pixel_norms'] = all_pixel_norms
+    curve_data['mean_pixel_norm'] = mean_pixel_norms
+    curve_data['rel_curve'] = rel_curves
+    curve_data['rel_norm'] = rel_norms
+
+    # Save
+    res_dir = args.wd + f'/results/features/{args.model_name}/pt_{args.pretrained}/{args.layer}/'
+    if not os.path.exists(res_dir) == True:
+        os.makedirs(res_dir)
+
+    file_path = res_dir + '/curve_props_df.pkl'
+    with open(file_path, 'wb') as f:
+        pickle.dump(curve_data, f)
     
-    return activation_data
+    return curve_data
 
 
 def static_control(activation_data): 
@@ -373,20 +278,7 @@ activation_data = activation_data.reset_index()
 
 # static_control(activation_data)
 curve_data = calc_properties(activation_data=activation_data)
+print('Done calculating curvature properties')
 
-# Plot relationships variables of interest 
-scatter_plot(df=curve_data, x='curve', y='norm')
-scatter_plot(df=curve_data, x='lse', y='norm')
-scatter_plot(df=curve_data, x='curve', y='lse')
-scatter_plot(df=curve_data, x='pixel_curve', y='pixel_norm')
-scatter_plot(df=curve_data, x='pixel_lse', y='pixel_norm')
-scatter_plot(df=curve_data, x='pixel_curve', y='pixel_lse')
-scatter_plot(df=curve_data, x='rel_curve', y='norm')
-scatter_plot(df=curve_data, x='rel_lse', y='norm')
-
-
-# Qualitative inspections
-# scatter_control(curve_data=curve_data, n_samples=1000, n_control_videos=25, x1='curve', x2='norm')
-# cluster_control(curve_data=curve_data, x1='curve', x2='norm')
 
 
