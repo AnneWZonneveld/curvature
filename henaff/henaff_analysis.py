@@ -75,7 +75,7 @@ def load_image(image_path, goal='curve_test'):
             transforms.Normalize(mean=[0.5], std=[0.5])
         ])
 
-    elif goal == 'alex':
+    elif goal == 'alexnet':
         preprocess = transforms.Compose([
             transforms.Resize(256),
             transforms.CenterCrop(224),
@@ -93,7 +93,7 @@ def load_images(goal='curve_test'):
     stim_dir = '/Users/annewzonneveld/Documents/phd/projects/curvature/henaff/henaff_stimuli/'
     if goal == 'curve_test':
         img_array = np.zeros((10, 11, 3, 512, 512)) 
-    elif goal == 'alex':
+    elif goal == 'alexnet':
         img_array = np.zeros((10, 11, 3, 224, 224)) 
 
     for video in range(10):
@@ -118,8 +118,10 @@ def curvature_test():
         vids_curvs[i, :] = curvs
         mean_curvs[i] = mean_curve
 
-    print('mean curves for natural videos')
-    print(mean_curvs)
+    # print('mean pixel curves for natural videos')
+    # print(mean_curvs)
+
+    return(mean_curvs)
 
 
 features = {}
@@ -128,11 +130,11 @@ def get_features(name):
         features[name] = output.detach()
     return hook
 
+def model_curves(model_name = 'alexnet'):
 
-def model_test():
-    vids_array = load_images(goal='alex')
-
-    model = torch.hub.load('pytorch/vision:v0.10.0', 'alexnet', pretrained=True)
+    # Preproces sequences and load model
+    vids_array = load_images(goal=model_name)
+    model = torch.hub.load('pytorch/vision:v0.10.0', model_name, pretrained=True)
     model.eval()
 
     # Register layers of interest
@@ -158,13 +160,85 @@ def model_test():
             activations = features[key]
             _, curve = comp_curvatures(activations)
             curve_dict[key].append(curve)
+    
+    return curve_dict
 
+
+def model_test(model_name='alexnet'):
+
+    # Calculate mean pixel curves
+    mean_pix_curves = curvature_test()
+
+    # Calculate mean model curves
+    mean_model_curves = model_curves(model_name=model_name)
+
+    # Calculate rel curve per layer
+    rel_curves_dict = {}
+    layer_names = []
+    all_rel_curves = []
+    for key in mean_model_curves.keys():
+        layer_curves = mean_model_curves[key]
+        rel_curves =  np.array(layer_curves) - np.array(mean_pix_curves)
+        rel_curves_dict[key] = rel_curves
+
+        layer_names.extend([key]*len(rel_curves))
+        all_rel_curves.extend(rel_curves)
+
+    # Reformat data
+    df = pd.DataFrame()
+    df['rel_curve'] = all_rel_curves
+    df['layer'] = layer_names
+
+    pixel_point = pd.DataFrame({
+        'rel_curve': [0],
+        'layer': ['pixel']
+    })
+    
+    df = pd.concat([pixel_point, df], ignore_index=True)
+
+    # Create plot 
+    sns.set_style('white')
+    sns.set_style("ticks")
+    sns.set_context('paper', 
+                    rc={'font.size': 14, 
+                        'xtick.labelsize': 10, 
+                        'ytick.labelsize':10, 
+                        'axes.titlesize' : 13,
+                        'figure.titleweight': 'bold', 
+                        'axes.labelsize': 13, 
+                        'legend.fontsize': 8, 
+                        'font.family': 'Arial',
+                        'axes.spines.right' : False,
+                        'axes.spines.top' : False})
+
+
+    fig, ax = plt.subplots(dpi=300) 
+    sns.pointplot(x="layer", y="rel_curve", data=df, join=False, markers='o', dodge=True)
+    plt.axhline(y=0, color='gray', linestyle='-', linewidth=2, alpha=0.7)
+    plt.plot('layer', 'rel_curve', data=pixel_point, marker='o', color='gray', markersize=8, alpha=0.7)
+    ax.set_title(f'{model_name}')
+    ax.set_xlabel('layer')
+    ax.set_ylabel('Relative curve')
+    # ax.legend(title='type', labels=['feature space', 'pixel space'])
+    sns.despine(offset=10, top=True, right=True)
+    fig.tight_layout()
+
+    output_dir = f'/Users/annewzonneveld/Documents/phd/projects/curvature/results/figures/{model_name}/'
+    if not os.path.exists(output_dir) == True:
+        os.makedirs(output_dir)
+
+    img_path = output_dir + f'/henaff_model.png'
+    plt.savefig(img_path)
+    plt.clf()
 
 
 # ------------------ MAIN
 
-#Curvatures calculation test
-curvature_test()
+# Curvatures calculation test
+# mean_pix_curves = curvature_test()
+# print('mean pixel curves')
+# print(f'{mean_pix_curves}')
 
 # Modelling test
 shell()
+model_test(model_name='alexnet')
