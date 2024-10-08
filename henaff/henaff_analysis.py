@@ -66,10 +66,10 @@ def comp_curvatures(vid_array):
     return curvs, mean_curve
 
 
-def load_image(image_path, goal='curve_test'):
+def load_image(image_path, goal='pixel'):
 
     # Define the image transformation (Resize, Normalize, etc.)
-    if goal == 'curve_test':
+    if goal == 'pixel':
         preprocess = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.5], std=[0.5])
@@ -87,11 +87,11 @@ def load_image(image_path, goal='curve_test'):
     img_tensor = preprocess(img)  # Preprocess it
     return img_tensor.unsqueeze(0)
 
-def load_images(goal='curve_test'):
+def load_images(goal='pixel', sequence='natural'):
 
     # Load images (n_videos x n_frames x n_channels x height x width)
     stim_dir = '/Users/annewzonneveld/Documents/phd/projects/curvature/henaff/henaff_stimuli/'
-    if goal == 'curve_test':
+    if goal == 'pixel':
         img_array = np.zeros((10, 11, 3, 512, 512)) 
     elif goal == 'alexnet':
         img_array = np.zeros((10, 11, 3, 224, 224)) 
@@ -99,17 +99,17 @@ def load_images(goal='curve_test'):
     for video in range(10):
         vid_name = f'movie{video+1}/'
         vid_folder = stim_dir + vid_name
-        img_paths = sorted(glob.glob(f'{vid_folder}/natural*'))
+        img_paths = sorted(glob.glob(f'{vid_folder}/{sequence}*'))
         for img_idx in range(len(img_paths)):
             img = load_image(img_paths[img_idx], goal=goal)
             img_array[video, img_idx, :, :, :] = img[np.newaxis, ...]
     
     return img_array
 
-def curvature_test():
+def curvature_test(sequence='natural'):
 
     # Load videos 
-    vids_array = load_images(goal='curve_test')
+    vids_array = load_images(goal='pixel', sequence=sequence)
     vids_curvs = np.zeros((vids_array.shape[0], vids_array.shape[1] - 2))
     mean_curvs = np.zeros(vids_array.shape[0])
 
@@ -130,10 +130,10 @@ def get_features(name):
         features[name] = output.detach()
     return hook
 
-def model_curves(model_name = 'alexnet'):
+def model_curves(model_name = 'alexnet', sequence='natural'):
 
     # Preproces sequences and load model
-    vids_array = load_images(goal=model_name)
+    vids_array = load_images(goal=model_name, sequence=sequence)
     model = torch.hub.load('pytorch/vision:v0.10.0', model_name, pretrained=True)
     model.eval()
 
@@ -166,35 +166,57 @@ def model_curves(model_name = 'alexnet'):
 
 def model_test(model_name='alexnet'):
 
-    # Calculate mean pixel curves
-    mean_pix_curves = curvature_test()
 
-    # Calculate mean model curves
-    mean_model_curves = model_curves(model_name=model_name)
+    sequences = ['natural', 'synthetic', 'contrast']
+    # sequence_pix_dict = {}
+    # sequence_model_dict = {}
 
-    # Calculate rel curve per layer
-    rel_curves_dict = {}
+    sequence_names = []
     layer_names = []
     all_rel_curves = []
-    for key in mean_model_curves.keys():
-        layer_curves = mean_model_curves[key]
-        rel_curves =  np.array(layer_curves) - np.array(mean_pix_curves)
-        rel_curves_dict[key] = rel_curves
+    for sequence in sequences:
 
-        layer_names.extend([key]*len(rel_curves))
-        all_rel_curves.extend(rel_curves)
+        print(f'Processing {sequence} sequences')
+
+        # Calculate mean pixel curves
+        mean_pix_curves = curvature_test(sequence=sequence)
+
+        # Calculate mean model curves
+        mean_model_curves = model_curves(model_name=model_name, sequence=sequence)
+
+        # sequence_pix_dict[sequence] = mean_pix_curves
+        # sequence_model_dict[sequence] = mean_model_curves
+
+        # Calculate rel curve per layer
+        rel_curves_dict = {}
+        # layer_names = []
+        # all_rel_curves = []
+        for key in mean_model_curves.keys():
+            layer_curves = mean_model_curves[key]
+            rel_curves =  np.array(layer_curves) - np.array(mean_pix_curves)
+            rel_curves_dict[key] = rel_curves
+
+            layer_names.extend([key]*len(rel_curves))
+            sequence_names.extend([sequence]*len(rel_curves))
+            all_rel_curves.extend(rel_curves)
+        
+        layer_names.append('pixel')
+        sequence_names.append(sequence)
+        all_rel_curves.append(0) 
 
     # Reformat data
     df = pd.DataFrame()
     df['rel_curve'] = all_rel_curves
     df['layer'] = layer_names
+    df['sequence'] = sequence_names
+    df['layer'] = pd.Categorical(df['layer'], categories=['pixel', 'max1', 'max2', 'max3'])
 
-    pixel_point = pd.DataFrame({
-        'rel_curve': [0],
-        'layer': ['pixel']
-    })
+    # pixel_point = pd.DataFrame({
+    #     'rel_curve': [0],
+    #     'layer': ['pixel']
+    # })
     
-    df = pd.concat([pixel_point, df], ignore_index=True)
+    # df = pd.concat([pixel_point, df], ignore_index=True)
 
     # Create plot 
     sns.set_style('white')
@@ -213,9 +235,10 @@ def model_test(model_name='alexnet'):
 
 
     fig, ax = plt.subplots(dpi=300) 
-    sns.pointplot(x="layer", y="rel_curve", data=df, join=False, markers='o', dodge=True)
+    sns.pointplot(x="layer", y="rel_curve", hue="sequence", hue_order=['natural', 'contrast', 'synthetic'], data=df[df['layer'] != 'pixel'], join=False, markers='o', dodge=True)
+    plt.scatter(x=['pixel'], y=[0], color='gray', s=100, zorder=5, label='Pixel (0)')
     plt.axhline(y=0, color='gray', linestyle='-', linewidth=2, alpha=0.7)
-    plt.plot('layer', 'rel_curve', data=pixel_point, marker='o', color='gray', markersize=8, alpha=0.7)
+    # plt.plot('layer', 'rel_curve', data=pixel_point, marker='o', color='gray', markersize=8, alpha=0.7)
     ax.set_title(f'{model_name}')
     ax.set_xlabel('layer')
     ax.set_ylabel('Relative curve')
