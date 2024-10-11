@@ -1,7 +1,7 @@
 """
 Use python 3.7
 
-Code to replicate henaff curvature analysis in python. 
+Code to replicate henaff curvature calculations in python. 
 Based on repository : https://github.com/olivierhenaff/neural-straightening/tree/master
 Able to replicate mean curvature measurements as given in 'acute data -combined_235x.csc' file 
 https://osf.io/vf2xk/
@@ -26,6 +26,7 @@ import matplotlib.pyplot as plt
 from sklearn.utils import resample
 from IPython import embed as shell
 from PIL import Image
+import torch
 from torchvision import transforms
 
 def comp_speed(vid_array):
@@ -47,7 +48,7 @@ def comp_speed(vid_array):
     return dif_vectors, norms
 
 def comp_curvatures(vid_array):
-    """ Compute curvatures """
+    """ Compute curvatures based on angles of velocity vectors. """
     num_frames = vid_array.shape[0]
     dif_vectors, norms = comp_speed(vid_array)
 
@@ -64,41 +65,260 @@ def comp_curvatures(vid_array):
 
     return curvs, mean_curve
 
-# Define the image transformation (Resize, Normalize, etc.)
-preprocess = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5], std=[0.5])
-])
 
-def load_image(image_path):
+def load_image(image_path, goal='pixel'):
+
+    # Define the image transformation (Resize, Normalize, etc.)
+    if goal == 'pixel':
+        preprocess = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5], std=[0.5])
+        ])
+
+    elif goal in ['alexnet', 'vgg19', 'resnet50']:
+        preprocess = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5], std=[0.5])
+        ])
+
+
     img = Image.open(image_path).convert('L')  
     img_tensor = preprocess(img)  # Preprocess it
     return img_tensor.unsqueeze(0)
 
-def load_images():
+def load_images(goal='pixel', sequence='natural'):
+
+    if sequence == 'natural':
+        frame_names = ['natural01',   'natural02',   'natural03',   'natural04',   'natural05',   'natural06',   'natural07',   'natural08',   'natural09',   'natural10', 'natural11']
+    elif sequence == 'synthetic':
+        frame_names = ['natural01', 'synthetic02', 'synthetic03', 'synthetic04', 'synthetic05', 'synthetic06', 'synthetic07', 'synthetic08', 'synthetic09', 'synthetic10', 'natural11']
+    elif sequence == 'contrast':
+        frame_names = ['contrast01',  'contrast02',  'contrast03',  'contrast04',  'contrast05',  'contrast06',  'contrast07',  'contrast08',  'contrast09',  'contrast10', 'natural01']
 
     # Load images (n_videos x n_frames x n_channels x height x width)
     stim_dir = '/Users/annewzonneveld/Documents/phd/projects/curvature/henaff/henaff_stimuli/'
-    img_array = np.zeros((10, 11, 3, 512, 512)) # or one channel?
-    for video in range(10):
-        vid_name = f'movie{video+1}/'
-        vid_folder = stim_dir + vid_name
-        img_paths = sorted(glob.glob(f'{vid_folder}/natural*'))
-        for img_idx in range(len(img_paths)):
-            img = load_image(img_paths[img_idx])
-            img_array[video, img_idx, :, :, :] = img[np.newaxis, ...]
-    
+    if goal == 'pixel':
+        img_array = np.zeros((10, 11, 3, 512, 512)) 
+    elif goal in ['alexnet', 'vgg19', 'resnet50']:
+        img_array = np.zeros((10, 11, 3, 224, 224)) 
+
+    if sequence in ['natural', 'synthetic']:
+        for video in range(10):
+            vid_name = f'movie{video+1}/'
+            vid_folder = stim_dir + vid_name
+            for i in range(len(frame_names)): 
+                img_path = vid_folder + f'{frame_names[i]}.png'
+                img = load_image(img_path, goal=goal)
+                img_array[video, i, :, :, :] = img[np.newaxis, ...]
+    else: 
+        contrast_videos = [1, 3, 6, 9]
+        for video in range(10):
+            vid_name = f'movie{video+1}/'
+            vid_folder = stim_dir + vid_name
+            if video in contrast_videos:
+                for i in range(len(frame_names)): 
+                    img_path = vid_folder + f'{frame_names[i]}.png'
+                    img = load_image(img_path, goal=goal)
+                    img_array[video, i, :, :, :] = img[np.newaxis, ...]
+
     return img_array
+
+def curvature_test(sequence='natural'):
+
+    # Load videos 
+    vids_array = load_images(goal='pixel', sequence=sequence)
+    vids_curvs = np.zeros((vids_array.shape[0], vids_array.shape[1] - 2))
+    mean_curvs = np.zeros(vids_array.shape[0])
+
+
+    if sequence in ['natural', 'synthetic']:
+        for i in range(vids_array.shape[0]): 
+            curvs, mean_curve = comp_curvatures(vids_array[i, :, :, :])
+            vids_curvs[i, :] = curvs
+            mean_curvs[i] = mean_curve
+    else:
+        contrast_videos = [1, 3, 6, 9]
+        for i in range(vids_array.shape[0]): 
+            if i in contrast_videos:
+                curvs, mean_curve = comp_curvatures(vids_array[i, :, :, :])
+                vids_curvs[i, :] = curvs
+                mean_curvs[i] = mean_curve
+            else:
+                mean_curvs[i] = np.nan
+
+    # print('mean pixel curves for natural videos')
+    # print(mean_curvs)
+
+    return(mean_curvs)
+
+
+def model_curves(model, model_name = 'alexnet', sequence='natural'):
+
+    features = {}
+    def get_features(name):
+        def hook(model, input, output):
+            features[name] = output.detach()
+        return hook
+
+    # Preproces sequences and load model
+    vids_array = load_images(goal=model_name, sequence=sequence)
+
+    # Register layers of interest
+    if model_name == 'alexnet':
+        model.features[2].register_forward_hook(get_features('max1'))
+        model.features[5].register_forward_hook(get_features('max2'))
+        model.features[12].register_forward_hook(get_features('max3'))
+
+        curve_dict = {
+            'max1': [],
+            'max2': [],
+            'max3': []
+        }
+
+    elif model_name == 'vgg19':
+
+        model.features[4].register_forward_hook(get_features('max1'))
+        model.features[9].register_forward_hook(get_features('max2'))
+        model.features[16].register_forward_hook(get_features('max3'))
+        model.features[23].register_forward_hook(get_features('max4'))
+        model.features[30].register_forward_hook(get_features('max5'))
+
+        curve_dict = {
+            'max1': [],
+            'max2': [],
+            'max3': [],
+            'max4': [],
+            'max5': []
+        }
+
+    # Extract features
+    if sequence in ['natural', 'synthetic']:
+        for video in range(vids_array.shape[0]):
+            print(f'Processing vid {video}')
+
+            images = torch.from_numpy(vids_array[video]).to(torch.float32)
+
+            with torch.no_grad():
+                _ = model(images) 
+        
+            # Calc curvature
+            for key in curve_dict:
+                activations = features[key]
+                _, curve = comp_curvatures(activations)
+                curve_dict[key].append(curve)
+    else: 
+        contrast_videos = [1, 3, 6, 9]
+        for video in range(vids_array.shape[0]): 
+            print(f'Processing vid {video}')
+            if video in contrast_videos:
+
+                images = torch.from_numpy(vids_array[video]).to(torch.float32)
+
+                with torch.no_grad():
+                    _ = model(images) 
+            
+                # Calc curvature
+                for key in curve_dict:
+                    activations = features[key]
+                    _, curve = comp_curvatures(activations)
+                    curve_dict[key].append(curve)
+            else:
+                for key in curve_dict:
+                    curve_dict[key].append(np.nan)
+     
+    return curve_dict
+
+
+def model_test(model_name='alexnet'):
+
+    # Load model
+    model = torch.hub.load('pytorch/vision:v0.10.0', model_name, pretrained=True)
+    model.eval()
+
+    sequences = ['natural', 'synthetic', 'contrast']
+    # sequences = ['contrast']
+    sequence_names = []
+    layer_names = []
+    all_rel_curves = []
+    for sequence in sequences:
+
+        print(f'Processing {sequence} sequences')
+
+        # Calculate mean pixel curves
+        mean_pix_curves = curvature_test(sequence=sequence)
+
+        # Calculate mean model curves
+        mean_model_curves = model_curves(model = model, model_name=model_name, sequence=sequence)
+
+        # Calculate rel curve per layer
+        rel_curves_dict = {}
+        for key in mean_model_curves.keys():
+            layer_curves = mean_model_curves[key]
+            rel_curves =  np.array(layer_curves) - np.array(mean_pix_curves)
+            # rel_curves_dict[key] = rel_curves
+
+            layer_names.extend([key]*len(rel_curves))
+            sequence_names.extend([sequence]*len(rel_curves))
+            all_rel_curves.extend(rel_curves)
+        
+        layer_names.append('pixel')
+        sequence_names.append(sequence)
+        all_rel_curves.append(0) 
+
+    shell()
+
+    # Reformat data
+    df = pd.DataFrame()
+    df['rel_curve'] = all_rel_curves
+    df['layer'] = layer_names
+    df['sequence'] = sequence_names
+    df['layer'] = pd.Categorical(df['layer'], categories=['pixel'] + sorted(sorted(df['layer'].unique().tolist(), reverse=True)[1:]))
+
+    # Create plot 
+    sns.set_style('white')
+    sns.set_style("ticks")
+    sns.set_context('paper', 
+                    rc={'font.size': 14, 
+                        'xtick.labelsize': 10, 
+                        'ytick.labelsize':10, 
+                        'axes.titlesize' : 13,
+                        'figure.titleweight': 'bold', 
+                        'axes.labelsize': 13, 
+                        'legend.fontsize': 8, 
+                        'font.family': 'Arial',
+                        'axes.spines.right' : False,
+                        'axes.spines.top' : False})
+
+
+    fig, ax = plt.subplots(dpi=300) 
+    sns.pointplot(x="layer", y="rel_curve", hue="sequence", hue_order=['natural', 'contrast', 'synthetic'], data=df[df['layer'] != 'pixel'], join=False, markers='o', dodge=True)
+    plt.scatter(x=['pixel'], y=[0], color='gray', s=100, zorder=5, label='Pixel (0)')
+    plt.axhline(y=0, color='gray', linestyle='-', linewidth=2, alpha=0.7)
+    ax.set_title(f'{model_name}')
+    ax.set_xlabel('layer')
+    ax.set_ylabel('Relative curve')
+    sns.despine(offset=10, top=True, right=True)
+    fig.tight_layout()
+
+    output_dir = f'/Users/annewzonneveld/Documents/phd/projects/curvature/results/figures/{model_name}/'
+    if not os.path.exists(output_dir) == True:
+        os.makedirs(output_dir)
+
+    img_path = output_dir + f'/henaff_model.png'
+    plt.savefig(img_path)
+    plt.clf()
 
 
 # ------------------ MAIN
-vids_array = load_images()
 
-# Compute curvatures
-vids_curvs = np.zeros((vids_array.shape[0], vids_array.shape[1] - 2))
-mean_curvs = np.zeros(vids_array.shape[0])
+# Curvatures calculation test
+# mean_pix_curves = curvature_test()
+# print('mean pixel curves')
+# print(f'{mean_pix_curves}')
 
-for i in range(vids_array.shape[0]):
-    curvs, mean_curve = comp_curvatures(vids_array[i, :, :, :])
-    vids_curvs[i, :] = curvs
-    mean_curvs[i] = mean_curve
+# Modelling test
+# model_test(model_name='alexnet')
+# model_test(model_name='vgg19')
+model_test(model_name='resnet50')
