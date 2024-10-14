@@ -28,6 +28,19 @@ from PIL import Image
 import torch
 from torchvision import transforms
 
+from torchvision.transforms import Compose, Lambda
+from torchvision.transforms._transforms_video import (
+    CenterCropVideo,
+    NormalizeVideo,
+)
+
+from pytorchvideo.data.encoded_video import EncodedVideo
+from pytorchvideo.transforms import (
+    ApplyTransformToKey,
+    ShortSideScale,
+    UniformTemporalSubsample
+)
+
 # ------------------- Input arguments
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_name', default='resnet50', type=str)
@@ -42,7 +55,6 @@ for key, val in vars(args).items():
 start_time = time.time()
 
 #### ----------------
-
 
 def comp_speed(vid_array):
     '''Compute
@@ -83,7 +95,6 @@ def comp_curvatures(vid_array):
 
 def load_image(image_path, goal='pixel'):
 
-    # Define the image transformation (Resize, Normalize, etc.)
     if goal == 'pixel':
         preprocess = transforms.Compose([
             transforms.ToTensor(),
@@ -98,10 +109,23 @@ def load_image(image_path, goal='pixel'):
             transforms.Normalize(mean=[0.5], std=[0.5])
         ])
 
-
     img = Image.open(image_path).convert('L')  
-    img_tensor = preprocess(img)  # Preprocess it
+    img_tensor = preprocess(img)  
+
     return img_tensor.unsqueeze(0)
+
+def load_video(image_path):
+    """
+    Construct a video made of repititions of same frame with correct size (n channels x frames x height x width)
+    """
+
+    img = load_image(image_path, goal='resnet50')
+    img_rgb = img.squeeze(0).repeat(3, 1, 1)
+    img_rf = torch.cat([img_rgb.unsqueeze(0)] * 8, dim=0)
+    img_rf = img_rf.permute(1, 0, 2, 3) 
+
+    return img_rf
+
 
 def load_images(goal='pixel', sequence='natural'):
 
@@ -117,6 +141,8 @@ def load_images(goal='pixel', sequence='natural'):
         img_array = np.zeros((10, 11, 3, 512, 512)) 
     elif goal in ['alexnet', 'vgg19', 'resnet50', 'c2d_r50']:
         img_array = np.zeros((10, 11, 3, 224, 224)) 
+    elif goal == 'c2d_r50':
+        img_array = np.zeros((10, 11, 3, 8, 224, 224)) 
 
     if sequence in ['natural', 'synthetic']:
         for video in range(10):
@@ -124,8 +150,12 @@ def load_images(goal='pixel', sequence='natural'):
             vid_folder = args.data_dir + vid_name
             for i in range(len(frame_names)): 
                 img_path = vid_folder + f'{frame_names[i]}.png'
-                img = load_image(img_path, goal=goal)
-                img_array[video, i, :, :, :] = img[np.newaxis, ...]
+                if goal == 'c2d_r50':
+                    img = load_video(img_path)
+                    img_array[video, i, :, :, :, :] = img
+                else:
+                    img = load_image(img_path, goal=goal)
+                    img_array[video, i, :, :, :] = img[np.newaxis, ...]
     else: 
         contrast_videos = [1, 3, 6, 9]
         for video in range(10):
@@ -134,8 +164,12 @@ def load_images(goal='pixel', sequence='natural'):
             if video in contrast_videos:
                 for i in range(len(frame_names)): 
                     img_path = vid_folder + f'{frame_names[i]}.png'
-                    img = load_image(img_path, goal=goal)
-                    img_array[video, i, :, :, :] = img[np.newaxis, ...]
+                    if goal == 'c2d_r50':
+                        img = load_video(img_path)
+                        img_array[video, i, :, :, :, :] = img
+                    else:
+                        img = load_image(img_path, goal=goal)
+                        img_array[video, i, :, :, :] = img[np.newaxis, ...]
 
     return img_array
 
@@ -235,20 +269,22 @@ def model_curves(model, model_name = 'alexnet', sequence='natural'):
             'layer4': []
         }
 
+    
     # Extract features
     if sequence in ['natural', 'synthetic']:
         for video in range(vids_array.shape[0]):
             print(f'Processing vid {video}')
 
             images = torch.from_numpy(vids_array[video]).to(torch.float32)
-            images = images.unsqueeze(2)
-
+            
             with torch.no_grad():
                 _ = model(images) 
         
             # Calc curvature
             for key in curve_dict:
                 activations = features[key]
+                if model_name == 'c2d_r50':
+                    activations  = activations.mean(dim=2) # average over model time steps
                 _, curve = comp_curvatures(activations)
                 curve_dict[key].append(curve)
     else: 
@@ -265,6 +301,8 @@ def model_curves(model, model_name = 'alexnet', sequence='natural'):
                 # Calc curvature
                 for key in curve_dict:
                     activations = features[key]
+                    if model_name == 'c2d_r50':
+                        activations  = activations.mean(dim=2) # average over model time steps
                     _, curve = comp_curvatures(activations)
                     curve_dict[key].append(curve)
             else:
@@ -277,7 +315,7 @@ def model_curves(model, model_name = 'alexnet', sequence='natural'):
 def model_test(model_name='alexnet'):
 
     # Load model
-    if model_name = 'c2d_r50':
+    if model_name == 'c2d_r50':
         model = torch.hub.load('facebookresearch/pytorchvideo', model_name, pretrained=True, force_reload=True)
     else:
         model = torch.hub.load('pytorch/vision:v0.10.0', model_name, pretrained=True)
