@@ -23,11 +23,26 @@ from tqdm import tqdm
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt 
-from sklearn.utils import resample
 from IPython import embed as shell
 from PIL import Image
 import torch
 from torchvision import transforms
+
+# ------------------- Input arguments
+parser = argparse.ArgumentParser()
+parser.add_argument('--model_name', default='resnet50', type=str)
+parser.add_argument('--data_dir', default='/home/azonnev/analyses/curvature/henaff/henaff_stimuli', type=str)
+parser.add_argument('--res_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/results', type=str)
+args = parser.parse_args()
+
+print('\nInput arguments:')
+for key, val in vars(args).items():
+	print('{:16} {}'.format(key, val))
+
+start_time = time.time()
+
+#### ----------------
+
 
 def comp_speed(vid_array):
     '''Compute
@@ -75,7 +90,7 @@ def load_image(image_path, goal='pixel'):
             transforms.Normalize(mean=[0.5], std=[0.5])
         ])
 
-    elif goal in ['alexnet', 'vgg19', 'resnet50']:
+    elif goal in ['alexnet', 'vgg19', 'resnet50', 'c2d_r50']:
         preprocess = transforms.Compose([
             transforms.Resize(256),
             transforms.CenterCrop(224),
@@ -98,16 +113,15 @@ def load_images(goal='pixel', sequence='natural'):
         frame_names = ['contrast01',  'contrast02',  'contrast03',  'contrast04',  'contrast05',  'contrast06',  'contrast07',  'contrast08',  'contrast09',  'contrast10', 'natural01']
 
     # Load images (n_videos x n_frames x n_channels x height x width)
-    stim_dir = '/Users/annewzonneveld/Documents/phd/projects/curvature/henaff/henaff_stimuli/'
     if goal == 'pixel':
         img_array = np.zeros((10, 11, 3, 512, 512)) 
-    elif goal in ['alexnet', 'vgg19', 'resnet50']:
+    elif goal in ['alexnet', 'vgg19', 'resnet50', 'c2d_r50']:
         img_array = np.zeros((10, 11, 3, 224, 224)) 
 
     if sequence in ['natural', 'synthetic']:
         for video in range(10):
             vid_name = f'movie{video+1}/'
-            vid_folder = stim_dir + vid_name
+            vid_folder = args.data_dir + vid_name
             for i in range(len(frame_names)): 
                 img_path = vid_folder + f'{frame_names[i]}.png'
                 img = load_image(img_path, goal=goal)
@@ -116,7 +130,7 @@ def load_images(goal='pixel', sequence='natural'):
         contrast_videos = [1, 3, 6, 9]
         for video in range(10):
             vid_name = f'movie{video+1}/'
-            vid_folder = stim_dir + vid_name
+            vid_folder = args.data_dir + vid_name
             if video in contrast_videos:
                 for i in range(len(frame_names)): 
                     img_path = vid_folder + f'{frame_names[i]}.png'
@@ -192,6 +206,34 @@ def model_curves(model, model_name = 'alexnet', sequence='natural'):
             'max4': [],
             'max5': []
         }
+    
+    elif model_name == 'resnet50':
+
+        model.layer1[2].relu.register_forward_hook(get_features('layer1'))
+        model.layer2[3].relu.register_forward_hook(get_features('layer2'))
+        model.layer3[5].relu.register_forward_hook(get_features('layer3'))
+        model.layer4[2].relu.register_forward_hook(get_features('layer4'))
+
+        curve_dict = {
+            'layer1': [],
+            'layer2': [],
+            'layer3': [],
+            'layer4': []
+        }
+    
+    elif model_name == 'c2d_r50':
+
+        model.blocks[1].res_blocks[2].activation.register_forward_hook(get_features('layer1'))
+        model.blocks[3].res_blocks[3].activation.register_forward_hook(get_features('layer2'))
+        model.blocks[4].res_blocks[5].activation.register_forward_hook(get_features('layer3'))
+        model.blocks[5].res_blocks[2].activation.register_forward_hook(get_features('layer4'))
+
+        curve_dict = {
+            'layer1': [],
+            'layer2': [],
+            'layer3': [],
+            'layer4': []
+        }
 
     # Extract features
     if sequence in ['natural', 'synthetic']:
@@ -199,6 +241,7 @@ def model_curves(model, model_name = 'alexnet', sequence='natural'):
             print(f'Processing vid {video}')
 
             images = torch.from_numpy(vids_array[video]).to(torch.float32)
+            images = images.unsqueeze(2)
 
             with torch.no_grad():
                 _ = model(images) 
@@ -234,7 +277,10 @@ def model_curves(model, model_name = 'alexnet', sequence='natural'):
 def model_test(model_name='alexnet'):
 
     # Load model
-    model = torch.hub.load('pytorch/vision:v0.10.0', model_name, pretrained=True)
+    if model_name = 'c2d_r50':
+        model = torch.hub.load('facebookresearch/pytorchvideo', model_name, pretrained=True, force_reload=True)
+    else:
+        model = torch.hub.load('pytorch/vision:v0.10.0', model_name, pretrained=True)
     model.eval()
 
     sequences = ['natural', 'synthetic', 'contrast']
@@ -266,8 +312,6 @@ def model_test(model_name='alexnet'):
         layer_names.append('pixel')
         sequence_names.append(sequence)
         all_rel_curves.append(0) 
-
-    shell()
 
     # Reformat data
     df = pd.DataFrame()
@@ -302,7 +346,7 @@ def model_test(model_name='alexnet'):
     sns.despine(offset=10, top=True, right=True)
     fig.tight_layout()
 
-    output_dir = f'/Users/annewzonneveld/Documents/phd/projects/curvature/results/figures/{model_name}/'
+    output_dir = args.res_dir + f'/figures/{model_name}/'
     if not os.path.exists(output_dir) == True:
         os.makedirs(output_dir)
 
@@ -312,6 +356,10 @@ def model_test(model_name='alexnet'):
 
 
 # ------------------ MAIN
+# Setting and checking cache
+os.environ['TORCH_HOME'] = '/ivi/zfs/s0/original_homes/azonnev/.cache'
+print("cache log: ")
+print(os.getenv('TORCH_HOME'))
 
 # Curvatures calculation test
 # mean_pix_curves = curvature_test()
@@ -320,5 +368,8 @@ def model_test(model_name='alexnet'):
 
 # Modelling test
 # model_test(model_name='alexnet')
-# model_test(model_name='vgg19')
-model_test(model_name='resnet50')
+# # model_test(model_name='vgg19')
+# # model_test(model_name='resnet50')
+model_test(model_name=args.model_name)
+
+print('Script done')
