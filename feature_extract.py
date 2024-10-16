@@ -19,6 +19,7 @@ import pandas as pd
 from IPython import embed as shell
 from sklearn.decomposition import PCA
 import torch 
+import psutil
 from torchvision.transforms import Compose, Lambda
 from torchvision.transforms._transforms_video import (
     CenterCropVideo,
@@ -45,7 +46,7 @@ print('\nInput arguments:')
 for key, val in vars(args).items():
 	print('{:16} {}'.format(key, val))
 
-#### --------------------------------
+#### ----------------
 
 def transform_clips(video, model_name='slow_r50'):
     """
@@ -108,12 +109,12 @@ def encode_videos(files, model_name='slow_r50'):
     returns 5 dimensional tensor (# of videos, RGB, # of frames, #height, #width)
 
     """
-    print("Encoding videos")
 
     inputs = []
     for file in files:
         video =  EncodedVideo.from_path(file)
         video_data = transform_clips(video=video, model_name=model_name)
+        del video
         inputs.append(video_data['video'])
     inputs = torch.stack(inputs)
 
@@ -135,8 +136,10 @@ def top5_preds(inputs):
 
     json_url = "https://dl.fbaipublicfiles.com/pyslowfast/dataset/class_names/kinetics_classnames.json"
     json_filename = "kinetics_classnames.json"
-    try: urllib.URLopener().retrieve(json_url, json_filename)
-    except: urllib.request.urlretrieve(json_url, json_filename)
+    try: 
+        urllib.URLopener().retrieve(json_url, json_filename)
+    except: 
+        urllib.request.urlretrieve(json_url, json_filename)
     with open(json_filename, "r") as f:
         kinetics_classnames = json.load(f)
 
@@ -163,6 +166,7 @@ def layer_activations(model, layer, inputs):
     returns convoluted tensor (# of videos, # of frames, #height, #width)
 
     """
+    print("Extracting activations")
 
     print("Extracting activations")
 
@@ -207,6 +211,10 @@ def perform_pca(activations, n_components=20): #bring back to 3 dimensions, simi
 
 
 # ------------------- MAIN
+# Setting and checking cache
+os.environ['TORCH_HOME'] = '/ivi/zfs/s0/original_homes/azonnev/.cache'
+print("cache log: ")
+print(os.getenv('TORCH_HOME'))
 
 # Load model
 model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=args.pretrained)
@@ -251,6 +259,8 @@ for batch in range(batches):
     # Perform dimensionality reduction on 2nd axis
     
     results_df = pd.concat([results_df, extract_df], axis=0)
+
+    del results
 
 # Save results
 res_folder = args.res_dir + f'/results/features/{args.model_name}/pt_{args.pretrained}/{args.layer}'
