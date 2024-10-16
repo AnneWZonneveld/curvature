@@ -17,6 +17,7 @@ import json
 import urllib
 import pandas as pd
 from IPython import embed as shell
+from sklearn.decomposition import PCA
 import torch 
 from torchvision.transforms import Compose, Lambda
 from torchvision.transforms._transforms_video import (
@@ -183,6 +184,28 @@ def layer_activations(model, layer, inputs):
     
     return activations
 
+def perform_pca(activations, n_components=20): #bring back to 3 dimensions, similar to RGB?
+
+    for i in range(activations.shape[0]):
+        pca_frames = []
+        for j in range(activations.shape[2]):
+            frame =  activations[i, :, j, :, :]  # [n channels,  height,  width]
+            frame_reshaped = frame.reshape(-1, frame.size(0)) # [height x width, n channels]
+            
+            pca = PCA(n_components=n_components)
+            frame_pca = pca.fit_transform(frame_reshaped.numpy()) # [n channels, n_componenets]
+            frame_pca = torch.tensor(frame_pca)
+
+            pca_frames.append(frame_pca)
+
+
+
+
+
+
+
+
+
 # ------------------- MAIN
 
 # Load model
@@ -225,10 +248,12 @@ for batch in range(batches):
     extract_df['activation'] = [activations[args.layer][i] for i in range(activations[args.layer].shape[0])]
     extract_df['pixels'] = [encoded_videos[i] for i in range(encoded_videos.shape[0])]
 
+    # Perform dimensionality reduction on 2nd axis
+    
     results_df = pd.concat([results_df, extract_df], axis=0)
 
 # Save results
-res_folder = args.wd + f'/results/features/{args.model_name}/pt_{args.pretrained}/{args.layer}'
+res_folder = args.res_dir + f'/results/features/{args.model_name}/pt_{args.pretrained}/{args.layer}'
 if not os.path.exists(res_folder) == True:
     os.makedirs(res_folder)
 

@@ -43,16 +43,25 @@ from pytorchvideo.transforms import (
 )
 
 def comp_speed(vid_array):
-    '''Compute
-    - velocity = difference vectors
-    - norm of difference vectors
-    for specificied sequence of images'''
 
-    # vid_array = img_array[0, :, :, :, :]
+    """
+    Compute velocity (=difference vectors) and norm for specified sequence of images
+
+    Parameters
+    ----------
+
+    vid_array: 4 dimensional tensor of image sequence (# of frames, # channels, height, width)
+
+    returns
+    - diff_vectors: list of length vid_array.shape[0] - 1
+    - norms: list of length vid_array.shape[0] - 1
+
+    """
+
     num_frames = vid_array.shape[0]
     dif_vectors = [vid_array[i, : , :, :].flatten() -  vid_array[i+1, : , :, :].flatten().flatten() for i in range(num_frames-1)]
     dif_vectors =  np.vstack(tuple(dif_vectors))
-    norms = np.zeros(num_frames)
+    norms = np.zeros(num_frames - 1) 
 
     for i in range(num_frames - 1):
         norms[i] = np.linalg.norm(dif_vectors[i]) + 1e-8  # Compute the norm (magnitude) of each difference vector
@@ -61,7 +70,7 @@ def comp_speed(vid_array):
     return dif_vectors, norms
 
 def comp_curvatures(vid_array):
-    """ Compute curvatures based on angles of velocity vectors. """
+    """ Compute curvatures based on angles of velocity vectors as based on video input."""
     num_frames = vid_array.shape[0]
     dif_vectors, norms = comp_speed(vid_array)
 
@@ -139,6 +148,7 @@ def load_images(goal='pixel', sequence='natural'):
                 img_path = vid_folder + f'{frame_names[i]}.png'
                 if goal == 'c2d_r50':
                     img = load_video(img_path)
+                    shell()
                     img_array[video, i, :, :, :, :] = img
                 else:
                     img = load_image(img_path, goal=goal)
@@ -182,9 +192,6 @@ def curvature_test(sequence='natural'):
                 mean_curvs[i] = mean_curve
             else:
                 mean_curvs[i] = np.nan
-
-    # print('mean pixel curves for natural videos')
-    # print(mean_curvs)
 
     return(mean_curvs)
 
@@ -374,7 +381,7 @@ def model_test(model_name='alexnet'):
 # print(f'{mean_pix_curves}')
 
 # Modelling test
-# model_test(model_name='alexnet')
+model_test(model_name='alexnet')
 # model_test(model_name='vgg19')
 # model_test(model_name='resnet50')
-model_test(model_name='c2d_r50')
+# model_test(model_name='c2d_r50')
