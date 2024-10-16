@@ -188,6 +188,28 @@ def layer_activations(model, layer, inputs):
     
     return activations
 
+def perform_pca(activations, n_components=20): #bring back to 3 dimensions, similar to RGB?
+
+    for i in range(activations.shape[0]):
+        pca_frames = []
+        for j in range(activations.shape[2]):
+            frame =  activations[i, :, j, :, :]  # [n channels,  height,  width]
+            frame_reshaped = frame.reshape(-1, frame.size(0)) # [height x width, n channels]
+            
+            pca = PCA(n_components=n_components)
+            frame_pca = pca.fit_transform(frame_reshaped.numpy()) # [n channels, n_componenets]
+            frame_pca = torch.tensor(frame_pca)
+
+            pca_frames.append(frame_pca)
+
+
+
+
+
+
+
+
+
 # ------------------- MAIN
 # Setting and checking cache
 os.environ['TORCH_HOME'] = '/ivi/zfs/s0/original_homes/azonnev/.cache'

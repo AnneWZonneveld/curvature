@@ -146,8 +146,8 @@ def comp_speed(vid_array):
 
     """
 
-    num_frames = vid_array.shape[0]
-    dif_vectors = [vid_array[i, : , :, :].flatten() -  vid_array[i+1, : , :, :].flatten().flatten() for i in range(num_frames-1)]
+    num_frames = vid_array.shape[1]
+    dif_vectors = [vid_array[:, i , :, :].flatten() -  vid_array[:, i+1, : , :].flatten().flatten() for i in range(num_frames-1)]
     dif_vectors =  np.vstack(tuple(dif_vectors))
     norms = np.zeros(num_frames - 1) 
 
@@ -206,5 +206,5 @@ def comp_curv(batch, model, model_name, layer, files, batch_size):
     end_time = time.time()
     print(f'b {batch} done: {(end_time - start_time)/60} mins')
     
-    return np.array(curves, pixel_curves)
+    return (curves, pixel_curves)
 

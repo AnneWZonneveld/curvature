@@ -213,6 +213,7 @@ def load_images(goal='pixel', sequence='natural'):
                 if goal == 'c2d_r50':
                     # Load image in as video 
                     img = load_video(img_path)
+                    shell()
                     img_array[video, i, :, :, :, :] = img
                 else:
                     # Load image

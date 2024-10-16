@@ -32,7 +32,7 @@ parser.add_argument('--pretrained', default=1, type=int)
 parser.add_argument('--layer', default='late', type=str)
 parser.add_argument('--data_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/data/mp4_h264', type=str)
 parser.add_argument('--res_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/results', type=str)
-parser.add_argument('--n_cpus', default=1, type=int)
+parser.add_argument('--n_cpus', default=2, type=int)
 args = parser.parse_args()
 
 print('\nInput arguments:')
@@ -133,10 +133,10 @@ def compute_all_curvature(batches = 32, n_cpus=1):
 # ------------------- MAIN
 if __name__ == '__main__':
 
-    # Setting and checking cache
-    os.environ['TORCH_HOME'] = '/ivi/zfs/s0/original_homes/azonnev/.cache'
-    print("cache log: ")
-    print(os.getenv('TORCH_HOME'))
+    # # Setting and checking cache
+    # os.environ['TORCH_HOME'] = '/ivi/zfs/s0/original_homes/azonnev/.cache'
+    # print("cache log: ")
+    # print(os.getenv('TORCH_HOME'))
 
     # Compute curvature 
     results = compute_all_curvature(batches=4, n_cpus=args.n_cpus)
