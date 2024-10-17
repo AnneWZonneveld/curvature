@@ -133,10 +133,10 @@ def compute_all_curvature(batches = 32, n_cpus=1):
 # ------------------- MAIN
 if __name__ == '__main__':
 
-    # # Setting and checking cache
-    # os.environ['TORCH_HOME'] = '/ivi/zfs/s0/original_homes/azonnev/.cache'
-    # print("cache log: ")
-    # print(os.getenv('TORCH_HOME'))
+    # Setting and checking cache
+    os.environ['TORCH_HOME'] = '/ivi/zfs/s0/original_homes/azonnev/.cache'
+    print("cache log: ")
+    print(os.getenv('TORCH_HOME'))
 
     # Compute curvature 
     results = compute_all_curvature(batches=4, n_cpus=args.n_cpus)
