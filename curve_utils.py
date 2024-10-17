@@ -9,6 +9,7 @@ from IPython import embed as shell
 from tqdm import tqdm
 import time
 import math
+from multiprocessing import current_process, cpu_count, shared_memory
 
 from torchvision.transforms import Compose, Lambda
 from torchvision.transforms._transforms_video import (
@@ -22,6 +23,10 @@ from pytorchvideo.transforms import (
     ShortSideScale,
     UniformTemporalSubsample
 )
+
+from iopath.common.file_io import PathManager
+pathmgr = PathManager()
+pathmgr.set_logging(False) 
 
 
 def transform_clips(video, model_name):
@@ -175,28 +180,30 @@ def comp_mean_curv(vid_array):
     return mean_curve
 
 
-def comp_curv(batch, model, model_name, layer, files, batch_size):
+def comp_curves(batch, model, model_name, layer, batches, batch_size, data_shape, dtype, shm_name):
 
-    print(f'Starting b {batch}')
+    print(f'starting batch {batch}')
     start_time = time.time()
 
-    # Encode batch of videos
-    batch_files = files[int(batch*batch_size):int((batch+1)*batch_size)]
-    encoded_videos = encode_videos(model_name=model_name, files=batch_files)
+    # Load in shared memory
+    existing_shm = shared_memory.SharedMemory(name=shm_name)
+    encoded_videos = np.ndarray(data_shape, dtype=dtype, buffer=existing_shm.buf)
+
+    # Select videos current batch
+    batch_videos = torch.tensor(encoded_videos[int(batch*batch_size):int((batch+1)*batch_size), :, :, :, :])
 
     # Get activations
-    activations = layer_activations(model=model, layer=layer, inputs=encoded_videos)
-
+    activations = layer_activations(model=model, layer=layer, inputs=batch_videos)
     activation_list = [activations[layer][i] for i in range(activations[layer].shape[0])]
     pixel_list = [encoded_videos[i] for i in range(encoded_videos.shape[0])]
 
     # Calculate curvature
     curves = []
     pixel_curves = []
-    for video in tqdm(range(len(batch_files))):
+    for video in tqdm(range(len(batch_videos))):
 
         activations = activation_list[video].numpy()
-        pixels = pixel_list[video].numpy()
+        pixels = pixel_list[video]
         
         curv = comp_mean_curv(activations)
         pixel_curv = comp_mean_curv(pixels)
@@ -207,4 +214,3 @@ def comp_curv(batch, model, model_name, layer, files, batch_size):
     print(f'b {batch} done: {(end_time - start_time)/60} mins')
     
     return (curves, pixel_curves)
-
