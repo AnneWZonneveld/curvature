@@ -23,21 +23,39 @@ import seaborn as sns
 import matplotlib.pyplot as plt 
 from IPython import embed as shell
 import math
-from curve_utils import comp_curv
+from curve_mp import *
+from curve_utils import *
 
-# ------------------- Input arguments
+from pytorchvideo.data.encoded_video import EncodedVideo
+from pytorchvideo.transforms import (
+    ApplyTransformToKey,
+    ShortSideScale,
+    UniformTemporalSubsample
+)
+
+from torchvision.transforms import Compose, Lambda
+from torchvision.transforms._transforms_video import (
+    CenterCropVideo,
+    NormalizeVideo,
+)
+
+
+# ---------------- Input 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_name', default='i3d_r50', type=str)
 parser.add_argument('--pretrained', default=1, type=int)
 parser.add_argument('--layer', default='late', type=str)
+# parser.add_argument('--data_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/data/mp4_h264', type=str)
+# parser.add_argument('--res_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/results', type=str)
 parser.add_argument('--data_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/data/mp4_h264', type=str)
 parser.add_argument('--res_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/results', type=str)
-parser.add_argument('--n_cpus', default=2, type=int)
+parser.add_argument('--batches', default=8, type=int)
+parser.add_argument('--n_cpus', default=4, type=int)
 args = parser.parse_args()
 
 print('\nInput arguments:')
 for key, val in vars(args).items():
-	print('{:16} {}'.format(key, val))
+    print('{:16} {}'.format(key, val))
 
 start_time = time.time()
 
@@ -98,51 +116,52 @@ def load_model():
     return model
 
 
-def compute_all_curvature(batches = 32, n_cpus=1):
+def compute_all_curvature(batches=8, n_cpus=1):
 
     # Load model
     model = load_model()
 
     # Find video files
     files = sorted(glob.glob(os.path.join(args.data_dir, '*mp4')))
-    files = files[0:4] #test
-
-    print(f'n files {len(files)}')
-
+    # files = files[0:32] #test
     batch_size = int(len(files)/batches)
-
+    print(f'n files {len(files)}')
     print(f'batches {batches}')
     print(f'batch size {batch_size}')
-    
-    partial_curv = partial(comp_curv, 
-                        model = model,
-                        model_name = args.model_name,
-                        layer = args.layer,
-                        files = files, 
-                        batch_size = batch_size)
 
-    bs = range(batches)
-    pool = mp.Pool(n_cpus)
-    results = pool.map(partial_curv, bs)
-    pool.close()
-    pool.join() 
+    # Encode all videos
+    encoded_videos = encode_videos(model_name=args.model_name, files=files)
+    encoded_videos = np.array(encoded_videos)
+    print(f'Encoded all videos')
 
-    return(list(results))
+    results = comp_curv_mp(model=model, model_name=args.model_name, layer=args.layer, encoded_videos=encoded_videos, batches=batches, batch_size=batch_size, n_cpus=n_cpus)
+
+    return results
 
 
 # ------------------- MAIN
 if __name__ == '__main__':
-
     # # Setting and checking cache
     # os.environ['TORCH_HOME'] = '/ivi/zfs/s0/original_homes/azonnev/.cache'
     # print("cache log: ")
     # print(os.getenv('TORCH_HOME'))
 
     # Compute curvature 
-    results = compute_all_curvature(batches=4, n_cpus=args.n_cpus)
+    results = compute_all_curvature(batches=args.batches, n_cpus=args.n_cpus)
 
-    # # Reformat results
-    # results_df = pd.DataFrame()
+    # Reformat results
+    results_df = pd.DataFrame()
+    all_curvs = []
+    all_pixel_curvs = []
+    for i in range(len(results)):
+        batch_res = results[i]
+        all_curvs.extend(batch_res[0])
+        all_pixel_curvs.extend(batch_res[1])
+
+    rel_curvs = np.array(all_curvs) - np.array(all_pixel_curvs)
+    results_df['curve'] = all_curvs
+    results_df['pixel_curve'] = all_pixel_curves
+    results_df['rel_curve'] = rel_curvs
 
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -154,9 +173,9 @@ if __name__ == '__main__':
     if not os.path.exists(res_folder) == True:
         os.makedirs(res_folder)
 
-    file_path = res_folder + '/res.pkl'
+    file_path = res_folder + '/curve_props_df.pkl'
     with open(file_path, 'wb') as f:
-        pickle.dump(results, f)
+        pickle.dump(results_df, f)
 
     print(f'Results stored at {file_path}')
 
