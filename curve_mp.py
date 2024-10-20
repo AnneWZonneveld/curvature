@@ -18,22 +18,21 @@ import seaborn as sns
 import matplotlib.pyplot as plt 
 from IPython import embed as shell
 import math
+from pytorchvideo.data.encoded_video import EncodedVideo
+# import logging
+# mp.log_to_stderr(logging.DEBUG)
+
 from curve_utils import *
 
-from pytorchvideo.data.encoded_video import EncodedVideo
 
 def comp_curv_mp(model, model_name, layer, encoded_videos, batches, batch_size, n_cpus):
 
     start_time = time.time()
 
-    # # Encode batch of videos
-    # batch_files = files[int(batch*batch_size):int((batch+1)*batch_size)]
-    # print(f'Batch files {batch_files}')
-    # encoded_videos = encode_videos(model_name=model_name, files=batch_files)
-
     # Create shared memory
-    time_stamp = time.time()
-    shm_name = f'shm_{model_name}_{time_stamp}'
+    # time_stamp = time.time()
+    # shm_name = f'shm_{model_name}_{time_stamp}'
+    shm_name = f'{model_name}_{layer}'
 
     try:
         shm = shared_memory.SharedMemory(create=True, size=encoded_videos.nbytes, name=shm_name)
@@ -42,12 +41,17 @@ def comp_curv_mp(model, model_name, layer, encoded_videos, batches, batch_size, 
         shm_old.close()
         shm_old.unlink()
         shm = shared_memory.SharedMemory(create=True, size=encoded_videos.nbytes, name=shm_name)
+    except Exception as e:
+        print(f"Shared memory error: {e}")
+        return None
 
     # Create a np.recarray using the buffer of shm
     shm_videos = np.recarray(shape=encoded_videos.shape, dtype=encoded_videos.dtype, buf=shm.buf)
 
     # Copy the data into the shared memory
     np.copyto(shm_videos, encoded_videos)
+    time.sleep(1)
+    print('Opened shared memory')
     
     partial_curv = partial(comp_curves, 
                         model = model,
@@ -60,13 +64,23 @@ def comp_curv_mp(model, model_name, layer, encoded_videos, batches, batch_size, 
                         shm_name = shm_name)
 
     bs = range(batches)
-    pool = mp.Pool(n_cpus)
+    print('Before opening pool')
+    assert n_cpus > 0, "n_cpus must be greater than 0"
+    try:
+        ctx = mp.get_context('spawn')  # or 'spawn' for cross-platform compatibility
+        pool = ctx.Pool(n_cpus)
+    except Exception as e:
+        print(f"Failed to open pool: {e}")
+
+    print('Opened pool')
 
     try:
         results = pool.map(partial_curv, bs)
     finally:
         pool.close()
         pool.join()
+    
+    print('Closed pool')
 
     shm.close()
     shm.unlink()

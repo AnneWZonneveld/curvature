@@ -39,6 +39,9 @@ from torchvision.transforms._transforms_video import (
     NormalizeVideo,
 )
 
+import logging
+mp.log_to_stderr(logging.DEBUG)
+
 
 # ---------------- Input 
 parser = argparse.ArgumentParser()
@@ -129,12 +132,20 @@ def compute_all_curvature(batches=8, n_cpus=1):
     print(f'batches {batches}')
     print(f'batch size {batch_size}')
 
-    # Encode all videos
-    encoded_videos = encode_videos(model_name=args.model_name, files=files)
-    encoded_videos = np.array(encoded_videos)
-    print(f'Encoded all videos')
+    batch_results = []
 
-    results = comp_curv_mp(model=model, model_name=args.model_name, layer=args.layer, encoded_videos=encoded_videos, batches=batches, batch_size=batch_size, n_cpus=n_cpus)
+    for batch in range(batches):
+
+        # Select batch 
+        batch_files = files[int(batch*batch_size):int((batch+1)*batch_size), :, :, :, :]
+
+        # Encode batch
+        encoded_videos = encode_videos(model_name=args.model_name, files=batch_files)
+        encoded_videos = np.array(encoded_videos)
+        print(f'Encoded all videos')
+        results = comp_curv_mp(model=model, model_name=args.model_name, layer=args.layer, encoded_videos=encoded_videos, batches=batches, batch_size=batch_size, n_cpus=n_cpus)
+
+        batch_results.extend(results)
 
     return results
 
@@ -161,7 +172,7 @@ if __name__ == '__main__':
 
     rel_curvs = np.array(all_curvs) - np.array(all_pixel_curvs)
     results_df['curve'] = all_curvs
-    results_df['pixel_curve'] = all_pixel_curves
+    results_df['pixel_curve'] = all_pixel_curvs
     results_df['rel_curve'] = rel_curvs
 
     end_time = time.time()

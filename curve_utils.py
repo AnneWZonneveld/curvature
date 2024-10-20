@@ -183,7 +183,7 @@ def comp_mean_curv(vid_array):
 def comp_curves(batch, model, model_name, layer, batches, batch_size, data_shape, dtype, shm_name):
 
     print(f'starting batch {batch}')
-    start_time = time.time()
+    start_time = round(time.time())
 
     # Load in shared memory
     existing_shm = shared_memory.SharedMemory(name=shm_name)
@@ -195,7 +195,7 @@ def comp_curves(batch, model, model_name, layer, batches, batch_size, data_shape
     # Get activations
     activations = layer_activations(model=model, layer=layer, inputs=batch_videos)
     activation_list = [activations[layer][i] for i in range(activations[layer].shape[0])]
-    pixel_list = [encoded_videos[i] for i in range(encoded_videos.shape[0])]
+    pixel_list = [batch_videos[i] for i in range(batch_videos.shape[0])]
 
     # Calculate curvature
     curves = []
