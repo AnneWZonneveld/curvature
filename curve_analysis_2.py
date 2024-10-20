@@ -45,15 +45,17 @@ mp.log_to_stderr(logging.DEBUG)
 
 # ---------------- Input 
 parser = argparse.ArgumentParser()
-parser.add_argument('--model_name', default='i3d_r50', type=str)
+parser.add_argument('--model_name', default='resnet50', type=str)
 parser.add_argument('--pretrained', default=1, type=int)
-parser.add_argument('--layer', default='late', type=str)
+parser.add_argument('--layer', default='early', type=str)
 # parser.add_argument('--data_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/data/mp4_h264', type=str)
 # parser.add_argument('--res_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/results', type=str)
 parser.add_argument('--data_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/data/mp4_h264', type=str)
 parser.add_argument('--res_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/results', type=str)
-parser.add_argument('--batches', default=8, type=int)
-parser.add_argument('--n_cpus', default=4, type=int)
+parser.add_argument('--out_batch', default=1, type=int)
+parser.add_argument('--out_batches', default=19, type=int)
+parser.add_argument('--in_batches', default=29, type=int)
+parser.add_argument('--n_cpus', default=2, type=int)
 args = parser.parse_args()
 
 print('\nInput arguments:')
@@ -71,8 +73,8 @@ def load_model():
 
     if args.model_name in ['i3d_r50']:
         model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=args.pretrained, force_reload=True)
-    elif args.model_name in ['alexnet', 'vgg19', 'r50']:
-        model = torch.hub.load('pytorch/vision:v0.10.0', model_name, pretrained=True)
+    elif args.model_name in ['alexnet', 'vgg19', 'resnet50']:
+        model = torch.hub.load('pytorch/vision:v0.10.0', args.model_name, pretrained=True)
 
     model.eval()
     print(f'Model {args.model_name} loaded succesfully')
@@ -119,7 +121,7 @@ def load_model():
     return model
 
 
-def compute_all_curvature(batches=8, n_cpus=1):
+def compute_all_curvature(out_batch, out_batches=19, in_batches=29, n_cpus=1):
 
     # Load model
     model = load_model()
@@ -127,25 +129,20 @@ def compute_all_curvature(batches=8, n_cpus=1):
     # Find video files
     files = sorted(glob.glob(os.path.join(args.data_dir, '*mp4')))
     # files = files[0:32] #test
-    batch_size = int(len(files)/batches)
+    out_batch_size = int(len(files)/out_batches)
     print(f'n files {len(files)}')
-    print(f'batches {batches}')
-    print(f'batch size {batch_size}')
+    print(f'out batches {out_batches}')
+    print(f'out batch size {out_batch_size}')
 
-    batch_results = []
+    # Select batch 
+    out_batch_files = files[int(out_batch*out_batch_size):int((out_batch+1)*out_batch_size)]
 
-    for batch in range(batches):
+    # Encode batch
+    encoded_videos = encode_videos(model_name=args.model_name, files=out_batch_files)
+    encoded_videos = np.array(encoded_videos)
+    print(f'Encoded all videos')
 
-        # Select batch 
-        batch_files = files[int(batch*batch_size):int((batch+1)*batch_size), :, :, :, :]
-
-        # Encode batch
-        encoded_videos = encode_videos(model_name=args.model_name, files=batch_files)
-        encoded_videos = np.array(encoded_videos)
-        print(f'Encoded all videos')
-        results = comp_curv_mp(model=model, model_name=args.model_name, layer=args.layer, encoded_videos=encoded_videos, batches=batches, batch_size=batch_size, n_cpus=n_cpus)
-
-        batch_results.extend(results)
+    results = comp_curv_mp(model=model, model_name=args.model_name, layer=args.layer, encoded_videos=encoded_videos, out_batch=out_batch, in_batches=in_batches, n_cpus=n_cpus)
 
     return results
 
@@ -159,7 +156,7 @@ if __name__ == '__main__':
     print(os.getenv('TORCH_HOME'))
 
     # Compute curvature 
-    results = compute_all_curvature(batches=args.batches, n_cpus=args.n_cpus)
+    results = compute_all_curvature(out_batch = args.out_batch, out_batches=args.out_batches, n_cpus=args.n_cpus)
 
     # Reformat results
     results_df = pd.DataFrame()
@@ -178,14 +175,14 @@ if __name__ == '__main__':
     end_time = time.time()
     elapsed_time = end_time - start_time
 
-    print(f'Done computing curvature: {elapsed_time/60} mins')
+    print(f'Done computing curvature out batch {args.out_batch}: {elapsed_time/60} mins')
 
     # Save results
     res_folder = args.res_dir + f'/features/{args.model_name}/pt_{args.pretrained}/{args.layer}'
     if not os.path.exists(res_folder) == True:
         os.makedirs(res_folder)
 
-    file_path = res_folder + '/curve_props_df.pkl'
+    file_path = res_folder + f'/curve_props_df_b{args.out_batch}.pkl'
     with open(file_path, 'wb') as f:
         pickle.dump(results_df, f)
 

@@ -25,14 +25,11 @@ from pytorchvideo.data.encoded_video import EncodedVideo
 from curve_utils import *
 
 
-def comp_curv_mp(model, model_name, layer, encoded_videos, batches, batch_size, n_cpus):
+def comp_curv_mp(model, model_name, layer, encoded_videos, out_batch, in_batches, n_cpus):
 
     start_time = time.time()
 
-    # Create shared memory
-    # time_stamp = time.time()
-    # shm_name = f'shm_{model_name}_{time_stamp}'
-    shm_name = f'{model_name}_{layer}'
+    shm_name = f'{model_name}_{layer}_{out_batch}'
 
     try:
         shm = shared_memory.SharedMemory(create=True, size=encoded_videos.nbytes, name=shm_name)
@@ -50,20 +47,18 @@ def comp_curv_mp(model, model_name, layer, encoded_videos, batches, batch_size, 
 
     # Copy the data into the shared memory
     np.copyto(shm_videos, encoded_videos)
-    time.sleep(1)
-    print('Opened shared memory')
-    
+
+ 
     partial_curv = partial(comp_curves, 
                         model = model,
                         model_name = model_name,
                         layer = layer, 
-                        batches = batches,
-                        batch_size = batch_size,
+                        batches = in_batches,
                         data_shape = encoded_videos.shape,
                         dtype = encoded_videos.dtype,
                         shm_name = shm_name)
 
-    bs = range(batches)
+
     print('Before opening pool')
     assert n_cpus > 0, "n_cpus must be greater than 0"
     try:
@@ -75,6 +70,7 @@ def comp_curv_mp(model, model_name, layer, encoded_videos, batches, batch_size, 
     print('Opened pool')
 
     try:
+        bs = range(in_batches)
         results = pool.map(partial_curv, bs)
     finally:
         pool.close()

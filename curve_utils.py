@@ -41,7 +41,7 @@ def transform_clips(video, model_name):
     """
 
     # Define parameters based on model
-    if model_name in  ['slow_r50', 'i3d_r50']:
+    if model_name in  ['slow_r50', 'i3d_r50', 'resnet50']:
         side_size = 256
         mean = [0.45, 0.45, 0.45]
         std = [0.225, 0.225, 0.225]
@@ -180,7 +180,7 @@ def comp_mean_curv(vid_array):
     return mean_curve
 
 
-def comp_curves(batch, model, model_name, layer, batches, batch_size, data_shape, dtype, shm_name):
+def comp_curves(batch, model, model_name, layer, batches, data_shape, dtype, shm_name):
 
     print(f'starting batch {batch}')
     start_time = round(time.time())
@@ -190,13 +190,29 @@ def comp_curves(batch, model, model_name, layer, batches, batch_size, data_shape
     encoded_videos = np.ndarray(data_shape, dtype=dtype, buffer=existing_shm.buf)
 
     # Select videos current batch
+    batch_size = int(encoded_videos.shape[0]/batches)
     batch_videos = torch.tensor(encoded_videos[int(batch*batch_size):int((batch+1)*batch_size), :, :, :, :])
 
     # Get activations
-    activations = layer_activations(model=model, layer=layer, inputs=batch_videos)
-    activation_list = [activations[layer][i] for i in range(activations[layer].shape[0])]
-    pixel_list = [batch_videos[i] for i in range(batch_videos.shape[0])]
+    if model_name in ['i3d_r50']: # video models
+        activations = layer_activations(model=model, layer=layer, inputs=batch_videos)
+        activation_list = [activations[layer][i] for i in range(activations[layer].shape[0])]
 
+    elif model_name in ['resnet50']: # static models
+        batch_activations = []
+        for video in range(batch_videos.shape[0]):
+            video_activation = []
+            for frame in range(batch_videos.shape[2]):
+                frame_activation = layer_activations(model=model, layer=layer, inputs=batch_videos[video, :, frame, :, :].unsqueeze(0))
+                video_activation.append(frame_activation[layer])
+            video_activation = torch.cat(video_activation, dim=0)
+            batch_activations.append(video_activation)
+        batch_activations = torch.stack(batch_activations)
+        activation_list = [batch_activations[i] for i in range(batch_activations.shape[0])]
+    
+    # Get pixel values
+    pixel_list = [batch_videos[i] for i in range(batch_videos.shape[0])]
+            
     # Calculate curvature
     curves = []
     pixel_curves = []
