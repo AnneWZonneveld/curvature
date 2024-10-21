@@ -30,6 +30,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--model_name', default='i3d_r50', type=str)
 # parser.add_argument('--wd', default='/home/azonnev/analyses/curvature', type=str)
 parser.add_argument('--wd', default='/Users/annewzonneveld/Documents/phd/projects/curvature', type=str)
+parser.add_argument('--res_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/results', type=str)
 args = parser.parse_args()
 
 print('\nInput arguments:')
@@ -51,7 +52,7 @@ sns.set_context('paper',
                     'axes.spines.top' : False})
 
 # ----------------------------
-def load_data(layer, pretrained=1):
+def load_data(model_name, layer, pretrained=1):
     """ 
     Loads df of curvature properties
     
@@ -67,18 +68,27 @@ def load_data(layer, pretrained=1):
     print(f'Loading curvature data for {layer} layer pt {pretrained}')
 
     # Set to according layer  
-    if args.model_name == 'slow_r50':
+    if model_name == 'slow_r50':
         if layer == 'late': 
             layer = 'blocks.4.res_blocks.2.activation'
-    elif args.model_name == 'i3d_r50':
+    elif model_name == 'i3d_r50':
         if layer == 'early': 
             layer = 'blocks.1.res_blocks.2.activation'''
         elif layer == 'mid':
             layer = 'blocks.3.res_blocks.3.activation'
         elif layer == 'late':
             layer = 'blocks.5.res_blocks.2.activation'
+    
+    # Static models
+    elif model_name == 'resnet50':
+        if layer == 'early': 
+            layer = 'layer1.2.relu'
+        elif layer == 'mid':
+            layer = 'layer2.3.relu'
+        elif layer == 'late':
+            layer = 'layer4.2.relu'
 
-    curv_dir = args.wd + f'/results/features/{args.model_name}/pt_{pretrained}/{layer}/'
+    curv_dir = args.wd + f'/results/features/{model_name}/pt_{pretrained}/{layer}/'
     curv_file = curv_dir + 'curve_props_df.pkl'
 
     with open(curv_file, 'rb') as f:
@@ -87,7 +97,7 @@ def load_data(layer, pretrained=1):
     return curv_data
 
 
-def distr_plot(layer, pretrained):
+def distr_plot(model_name, layer, pretrained):
     """ 
     Plots 2 figures:
     - pixel vs feature curvature distribution 
@@ -103,10 +113,10 @@ def distr_plot(layer, pretrained):
 
     # Load data
     print('Loading data')
-    df = load_data(layer=layer, pretrained=pretrained)
+    df = load_data(model_name=model_name, layer=layer, pretrained=pretrained)
 
     # Reformat data
-    df_melted = pd.melt(df, value_vars=['mean_pixel_curv', 'mean_curv'], var_name='type', value_name='curve')
+    df_melted = pd.melt(df, value_vars=['pixel_curve', 'curve'], var_name='type', value_name='curve')
 
     # Set to according layer name 
     if args.model_name == 'slow_r50':
@@ -149,7 +159,7 @@ def distr_plot(layer, pretrained):
     plt.clf()
 
 
-def pt0_vs_pt1_rel_distr_plot(layer):
+def pt0_vs_pt1_rel_distr_plot(model_name, layer):
     """ 
     Plots the relative curvature for pretrained vs untrained activations.
 
@@ -162,8 +172,8 @@ def pt0_vs_pt1_rel_distr_plot(layer):
 
     # Load data
     print('Loading data')
-    pt1_df = load_data(layer=layer, pretrained=1)
-    pt0_df = load_data(layer=layer, pretrained=0)
+    pt1_df = load_data(model_name=model_name, layer=layer, pretrained=1)
+    pt0_df = load_data(model_name=model_name, layer=layer, pretrained=0)
 
     if args.model_name == 'slow_r50':
         if layer == 'late': 
@@ -194,6 +204,234 @@ def pt0_vs_pt1_rel_distr_plot(layer):
         os.makedirs(output_dir)
 
     img_path = output_dir + f'/comp_distr_plot.png'
+    plt.savefig(img_path)
+    plt.clf()
+
+
+def layers_rel_curve_plot(model_name, pretrained=1):
+    """ 
+    Plots the relative curvature for different layers.
+
+    Parameters
+    ----------
+
+    pretrained: bool
+
+    """
+
+    # Load data
+    print('Loading data')
+    data_dir = args.wd + f'/results/features/{model_name}/pt_{pretrained}/'
+    layers = os.listdir(data_dir)
+    data_dict = {layer: load_data(model_name=model_name, layer=layer, pretrained=1) for layer in layers}
+
+    all_rel_curvs = []
+    all_layer_names = []
+    for i in range(len(layers)):
+        layer = layers[i]
+        all_rel_curvs.extend(data_dict[layer]['rel_curve'])
+
+        if i == 0:
+            layer_name = 'early'
+        elif i == 1:
+            layer_name = 'mid'
+        elif i == 2:
+            layer_name = 'late'
+
+        layer_names = [layer_name]*len(data_dict[layer]['rel_curve'])
+        all_layer_names.extend(layer_names)
+
+    # Append 'pixel' category with value 0
+    all_rel_curvs.append(0)
+    all_layer_names.append('pixel')
+
+    # Reformat data
+    df = pd.DataFrame()
+    df['rel_curve'] = all_rel_curvs
+    df['layer'] = all_layer_names
+    df['layer'] = pd.Categorical(df['layer'], categories=['pixel', 'early', 'mid', 'late'], ordered=True)
+
+    # Plot
+    fig, ax = plt.subplots(dpi=300)
+    sns.pointplot(data=df[df['layer'] != 'pixel'], x="layer", y="rel_curve", join=False, markers='o', dodge=True, ax=ax)
+
+    # Add the 'pixel' category as a single gray point
+    pixel_y = df[df['layer'] == 'pixel']['rel_curve'].values[0]
+    ax.scatter('pixel', pixel_y, color='gray', s=100, label='pixel', zorder=5)
+
+    # Add a horizontal line at y=0
+    plt.axhline(y=0, color='gray', linestyle='-', linewidth=2, alpha=0.7)
+
+    ax.set_title(f'{model_name}')
+    ax.set_xlabel('layer')
+    ax.set_ylabel('Relative curve')
+    sns.despine(offset=10, top=True, right=True)
+    fig.tight_layout()
+
+    # Save the figure
+    output_dir = args.res_dir + f'/figures/{model_name}/pt_{pretrained}'
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    img_path = output_dir + f'/rel_curve_layers.png'
+    plt.savefig(img_path)
+    plt.clf()
+
+
+def layers_abs_curve_plot(pretrained=1):
+    """ 
+    Plots the absolute pixel and feature curvature for different layers.
+
+    Parameters
+    ----------
+
+    pretrained: bool
+
+    """
+
+    # Load data
+    print('Loading data')
+    data_dir = args.wd + f'/results/features/{args.model_name}/pt_{pretrained}/'
+    layers = os.listdir(data_dir)
+    data_dict = {layer: load_data(model_name=model_name, layer=layer, pretrained=1) for layer in layers}
+
+    all_curvs = []
+    all_data_types = []
+    all_layer_names = []
+    for i in range(len(layers)):
+        layer = layers[i]
+
+        if i == 0:
+            layer_name = 'early'
+        elif i == 1:
+            layer_name = 'mid'
+        elif i == 2:
+            layer_name = 'late'
+
+        layer_names = [layer_name] * len(data_dict[layer]['rel_curve'])
+
+        # Add pixel_curve data
+        all_curvs.extend(data_dict[layer]['pixel_curve'])
+        all_layer_names.extend(layer_names)
+        all_data_types.extend(['pixel'] * len(data_dict[layer]['pixel_curve']))
+
+        # Add feature curve data
+        all_curvs.extend(data_dict[layer]['curve'])
+        all_layer_names.extend(layer_names)
+        all_data_types.extend(['feature'] * len(data_dict[layer]['curve']))
+
+    # Append the pixel category with value 0
+    all_curvs.append(0)
+    all_layer_names.append('pixel')
+    all_data_types.append('pixel')
+
+    # Reformat data
+    df = pd.DataFrame()
+    df['curve'] = all_curvs
+    df['layer'] = all_layer_names
+    df['data_type'] = all_data_types
+
+    # Ensure correct categorical order for layers
+    df['layer'] = pd.Categorical(df['layer'], categories=['pixel', 'early', 'mid', 'late'], ordered=True)
+
+    # Plot
+    fig, ax = plt.subplots(dpi=300)
+
+    # Plot the feature data points excluding the pixel category
+    sns.pointplot(data=df[df['layer'] != 'pixel'], x="layer", y="curve", hue="data_type", join=False, markers='o', dodge=True, ax=ax)
+    ax.scatter('pixel', 0, color='gray', s=100, label='pixel', zorder=5)
+    plt.axhline(y=0, color='gray', linestyle='-', linewidth=2, alpha=0.7)
+    ax.set_title(f'{model_name}')
+    ax.set_xlabel('layer')
+    ax.set_ylabel('Relative curve')
+    sns.despine(offset=10, top=True, right=True)
+    fig.tight_layout()
+
+    # Save
+    output_dir = args.res_dir + f'/figures/{model_name}/pt_{pretrained}'
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    img_path = output_dir + f'/abs_curve_layers.png'
+    plt.savefig(img_path)
+    plt.clf()
+
+
+def layers_dyn_vs_static(static_model, dynamic_model, pretrained=1):
+    """ 
+    Plots the relative curvature for different layers.
+
+    Parameters
+    ----------
+
+    pretrained: bool
+
+    """
+
+    # Load data
+    print('Loading data')
+    static_dir = args.wd + f'/results/features/{static_model}/pt_{pretrained}/'
+    dynamic_dir = args.wd + f'/results/features/{dynamic_model}/pt_{pretrained}/'
+    static_layers = os.listdir(static_dir)
+    dynamic_layers = os.listdir(dynamic_dir)
+    static_dict = {layer: load_data(model_name=static_model, layer=layer, pretrained=1) for layer in static_layers}
+    dynamic_dict = {layer: load_data(model_name=dynamic_model, layer=layer, pretrained=1) for layer in dynamic_layers}
+
+    all_curvs = []
+    all_model_types = []
+    all_layer_names = []
+    for i in range(len(layers)):
+        static_layer = static_layers[i]
+        dynamic_layer = dynamic_layers[i]
+
+        if i == 0:
+            layer_name = 'early'
+        elif i == 1:
+            layer_name = 'mid'
+        elif i == 2:
+            layer_name = 'late'
+
+        layer_names = [layer_name] * len(static_dict[static_layer]['rel_curve'])
+
+        # Add dynamic curve data
+        all_curvs.extend(dynamic_dict[dynamic_layer]['rel_curve'])
+        all_layer_names.extend(layer_names)
+        all_model_types.extend(['dynamic'] * len(dynamic_dict[dynamic_layer]['rel_curve']))
+
+        # Add static curve data
+        all_curvs.extend(static_dict[static_layer]['rel_curve'])
+        all_layer_names.extend(layer_names)
+        all_model_types.extend(['static'] * len(static_dict[static_layer]['rel_curve']))
+
+    # Append the pixel category with value 0
+    all_curvs.append(0)
+    all_layer_names.append('pixel')
+    all_model_types.append('pixel')
+
+    # Reformat data
+    df = pd.DataFrame()
+    df['curve'] = all_curvs
+    df['layer'] = all_layer_names
+    df['model'] = all_data_types
+    df['layer'] = pd.Categorical(df['layer'], categories=['pixel', 'early', 'mid', 'late'], ordered=True)
+
+    # Plot
+    fig, ax = plt.subplots(dpi=300)
+    sns.pointplot(data=df[df['layer'] != 'pixel'], x="layer", y="curve", hue="model", join=False, markers='o', dodge=True, ax=ax)
+    ax.scatter('pixel', 0, color='gray', s=100, label='pixel', zorder=5)
+    plt.axhline(y=0, color='gray', linestyle='-', linewidth=2, alpha=0.7)
+    ax.set_title(f'{dynamic_model}')
+    ax.set_xlabel('layer')
+    ax.set_ylabel('Relative curve')
+    sns.despine(offset=10, top=True, right=True)
+    fig.tight_layout()
+
+    # Save
+    output_dir = args.res_dir + f'/figures/{dynamic_model}/pt_{pretrained}'
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    img_path = output_dir + f'/dyn_vs_static_layers.png'
     plt.savefig(img_path)
     plt.clf()
 
@@ -273,11 +511,17 @@ def scatter_plot(df, x, y):
 
 # ---------------- MAIN
 
+shell()
+
 # Plot distributions
 distr_plot(layer = 'late', pretrained=1)
 
 # Plot untrained vs pretrained relative curve plots
 pt0_vs_pt1_rel_distr_plot(layer = 'late')
+
+# Plot relative curve for different layers
+layers_rel_curv_plot(pretrained=1)
+layers_abs_curv_plot(pretrained=1)
 
 # Plot relationships variables of interest 
 # scatter_plot(df=curve_data, x='curve', y='norm')
