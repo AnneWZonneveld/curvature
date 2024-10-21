@@ -78,6 +78,29 @@ def load_data(layer, pretrained=1):
         elif layer == 'late':
             layer = 'blocks.5.res_blocks.2.activation'
 
+    # Static model
+    elif args.model_name == 'alexnet':
+        if args.layer == 'early': 
+            args.layer = 'features.2'
+        elif args.layer == 'mid':
+            args.layer = 'features.5'
+        elif args.layer == 'late':
+            args.layer = 'features.12'
+    elif args.model_name == 'vgg19':
+        if args.layer == 'early': 
+            args.layer = 'features.4'
+        elif args.layer == 'mid':
+            args.layer = 'features.16'
+        elif args.layer == 'late':
+            args.layer = 'features.30'
+    elif args.model_name == 'resnet50':
+        if args.layer == 'early': 
+            args.layer = 'layer1.2.relu'
+        elif args.layer == 'mid':
+            args.layer = 'layer2.3.relu'
+        elif args.layer == 'late':
+            args.layer = 'layer4.2.relu'
+
     curv_dir = args.wd + f'/results/features/{args.model_name}/pt_{pretrained}/{layer}/'
     curv_file = curv_dir + 'curve_props_df.pkl'
 
