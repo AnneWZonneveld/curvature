@@ -1,6 +1,6 @@
 
 """
-Uses python 3.7
+Uses python 3.8
 
 """
 
@@ -23,6 +23,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt 
 from IPython import embed as shell
 import math
+import fcntl
 from curve_mp import *
 from curve_utils import *
 
@@ -68,7 +69,7 @@ def load_model():
     Load according model and settings.
     """
 
-    if args.model_name in ['i3d_r50']:
+    if args.model_name in ['c2d_r50', 'i3d_r50', 'slowfast_r50', 'slow_r50']:
         model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=args.pretrained, force_reload=True)
     elif args.model_name in ['alexnet', 'vgg19', 'resnet50']:
         model = torch.hub.load('pytorch/vision:v0.10.0', args.model_name, pretrained=True)
@@ -77,20 +78,28 @@ def load_model():
     print(f'Model {args.model_name} loaded succesfully')
 
     # Set to according layer 
-    if args.model_name == 'slow_r50':
+    if args.model_name == 'slowfast_r50':
         if args.layer == 'early': 
-            args.layer = '...'
+            args.layer = 'blocks.0.multipathway_fusion.activation'
         elif args.layer == 'mid':
-            args.layer = '...'
+            args.layer = 'blocks.2.multipathway_fusion.activation'
+        elif args.layer == 'late':
+            args.layer = 'blocks.4.multipathway_fusion'
+    elif args.model_name == 'slow_r50':
+        if args.layer == 'early': 
+            args.layer = 'blocks.0.activation'
+        elif args.layer == 'mid':
+            args.layer = 'blocks.2.res_blocks.3.activation'
         elif args.layer == 'late':
             args.layer = 'blocks.4.res_blocks.2.activation'
-    elif args.model_name == 'i3d_r50':
+    elif args.model_name in ['i3d_r50', 'c2d_r50']:
         if args.layer == 'early': 
-            args.layer = 'blocks.1.res_blocks.2.activation'''
+            args.layer = 'blocks.1.res_blocks.2.activation'
         elif args.layer == 'mid':
             args.layer = 'blocks.3.res_blocks.3.activation'
         elif args.layer == 'late':
             args.layer = 'blocks.5.res_blocks.2.activation'
+
 
     # Static models
     elif args.model_name == 'alexnet':
@@ -125,7 +134,7 @@ def compute_all_curvature(out_batch, out_batches=19, in_batches=29, n_cpus=1):
 
     # Find video files
     files = sorted(glob.glob(os.path.join(args.data_dir, '*mp4')))
-    # files = files[0:32] #test
+    files = files[0:32] #test
     out_batch_size = int(len(files)/out_batches)
     print(f'n files {len(files)}')
     print(f'out batches {out_batches}')
@@ -150,6 +159,7 @@ if __name__ == '__main__':
     # os.environ['TORCH_HOME'] = '/ivi/zfs/s0/original_homes/azonnev/.cache'
     # print("cache log: ")
     # print(os.getenv('TORCH_HOME'))
+
 
     # Compute curvature 
     results = compute_all_curvature(out_batch = args.out_batch, out_batches=args.out_batches, n_cpus=args.n_cpus)
