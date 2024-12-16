@@ -18,6 +18,7 @@ import json
 import urllib
 import torch 
 from tqdm import tqdm
+import fcntl
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt 
@@ -39,8 +40,8 @@ from torchvision.transforms._transforms_video import (
     NormalizeVideo,
 )
 
-import logging
-mp.log_to_stderr(logging.DEBUG)
+# import logging
+# mp.log_to_stderr(logging.DEBUG)
 
 
 # ---------------- Input 
@@ -71,10 +72,20 @@ def load_model():
     Load according model and settings.
     """
 
-    if args.model_name in ['i3d_r50']:
-        model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=args.pretrained, force_reload=True)
-    elif args.model_name in ['alexnet', 'vgg19', 'resnet50']:
-        model = torch.hub.load('pytorch/vision:v0.10.0', args.model_name, pretrained=True)
+
+    lock_file = '/ivi/zfs/s0/original_homes/azonnev/.cache/hub/pytorchvideo-main.lock'
+
+    # Open and lock the file
+    with open(lock_file, 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+
+        # Directory creation and download code goes here
+        if args.model_name in ['i3d_r50', 'c2d_r50', 'slowfast_r50', 'slow_r50']:
+            model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=args.pretrained, force_reload=True)
+        elif args.model_name in ['alexnet', 'vgg19', 'resnet50']:
+            model = torch.hub.load('pytorch/vision:v0.10.0', args.model_name, pretrained=True)
+
+        fcntl.flock(lock, fcntl.LOCK_UN)  # Release the lock
 
     model.eval()
     print(f'Model {args.model_name} loaded succesfully')
@@ -87,9 +98,9 @@ def load_model():
             args.layer = '...'
         elif args.layer == 'late':
             args.layer = 'blocks.4.res_blocks.2.activation'
-    elif args.model_name == 'i3d_r50':
+    elif args.model_name in ['i3d_r50', 'c2d_r50', 'slowfast_r50']:
         if args.layer == 'early': 
-            args.layer = 'blocks.1.res_blocks.2.activation'''
+            args.layer = 'blocks.1.res_blocks.2.activation'
         elif args.layer == 'mid':
             args.layer = 'blocks.3.res_blocks.3.activation'
         elif args.layer == 'late':

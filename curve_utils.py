@@ -41,7 +41,7 @@ def transform_clips(video, model_name):
     """
 
     # Define parameters based on model
-    if model_name in  ['slow_r50', 'i3d_r50', 'resnet50']:
+    if model_name in  ['slow_r50', 'i3d_r50', 'c2d_r50', 'resnet50', 'vgg19', 'alexnet']:
         side_size = 256
         mean = [0.45, 0.45, 0.45]
         std = [0.225, 0.225, 0.225]
@@ -194,11 +194,11 @@ def comp_curves(batch, model, model_name, layer, batches, data_shape, dtype, shm
     batch_videos = torch.tensor(encoded_videos[int(batch*batch_size):int((batch+1)*batch_size), :, :, :, :])
 
     # Get activations
-    if model_name in ['i3d_r50']: # video models
+    if model_name in ['i3d_r50', 'c2d_r50', 'slowfast_r50']: # video models
         activations = layer_activations(model=model, layer=layer, inputs=batch_videos)
         activation_list = [activations[layer][i] for i in range(activations[layer].shape[0])]
 
-    elif model_name in ['resnet50']: # static models
+    elif model_name in ['resnet50', 'vgg19', 'alexnet']: # static models
         batch_activations = []
         for video in range(batch_videos.shape[0]):
             video_activation = []
