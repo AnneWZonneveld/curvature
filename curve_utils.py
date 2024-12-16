@@ -29,6 +29,27 @@ pathmgr = PathManager()
 pathmgr.set_logging(False) 
 
 
+class PackPathway(torch.nn.Module):
+    """
+    Transform for converting video frames as a list of tensors.
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, frames: torch.Tensor):
+        fast_pathway = frames
+        # Perform temporal sampling from the fast pathway.
+        slow_pathway = torch.index_select(
+            frames,
+            1,
+            torch.linspace(
+                0, frames.shape[1] - 1, frames.shape[1] // 4
+            ).long(),
+        )
+        frame_list = [slow_pathway, fast_pathway]
+        return frame_list
+
+
 def transform_clips(video, model_name):
     """
     Compose video data transforms --> specific to model
@@ -49,21 +70,69 @@ def transform_clips(video, model_name):
         num_frames = 8
         sampling_rate = 8
         frames_per_second = 30
+    
+    elif model_name == 'slowfast_r50':
+        side_size = 256
+        mean = [0.45, 0.45, 0.45]
+        std = [0.225, 0.225, 0.225]
+        crop_size = 256
+        num_frames = 32 # different than documentation
+        sampling_rate = 2
+        frames_per_second = 30
+    
+    elif model_name == 'r2plus1d_r50':
+        side_size = 256
+        mean = [0.45, 0.45, 0.45]
+        std = [0.225, 0.225, 0.225]
+        crop_size = 256
+        num_frames = 16
+        sampling_rate = 4
+        frames_per_second = 30
+    
+    elif model_name == 'csn_r101':
+        side_size = 256
+        mean = [0.45, 0.45, 0.45]
+        std = [0.225, 0.225, 0.225]
+        crop_size = 256
+        num_frames = 32
+        sampling_rate = 2
+        frames_per_second = 30
+    
+    elif model_name == 'x3d_s':
+        side_size = 182
+        mean = [0.45, 0.45, 0.45]
+        std = [0.225, 0.225, 0.225]
+        crop_size = 182
+        num_frames = 13
+        sampling_rate = 6
+        frames_per_second = 30
+    
+    elif model_name == 'mvit_base_16x4':
+        side_size = 224
+        mean = [0.45, 0.45, 0.45]
+        std = [0.225, 0.225, 0.225]
+        crop_size = 224
+        num_frames = 16
+        sampling_rate = 4
+        frames_per_second = 30
+
+
+
+    transforms_list = [
+        UniformTemporalSubsample(num_frames),
+        Lambda(lambda x: x / 255.0),
+        NormalizeVideo(mean, std),
+        ShortSideScale(size=side_size),
+        CenterCropVideo(crop_size=(crop_size, crop_size)),
+    ]
+
+    if model_name == 'slowfast_r50':
+        transforms_list.append(PackPathway())
 
     # Compose transformation
-    transform =  ApplyTransformToKey(
+    transform = ApplyTransformToKey(
         key="video",
-        transform=Compose(
-            [
-                UniformTemporalSubsample(sampling_rate),
-                Lambda(lambda x: x/255.0),
-                NormalizeVideo(mean, std),
-                ShortSideScale(
-                    size=side_size
-                ),
-                CenterCropVideo(crop_size=(crop_size, crop_size))
-            ]
-        ),
+        transform=Compose(transforms_list),
     )
 
     # The duration of the input clip is also specific to the model.
@@ -90,14 +159,29 @@ def encode_videos(files, model_name):
     returns 5 dimensional tensor (# of videos, RGB, # of frames, #height, #width)
 
     """
+    if model_name == 'slowfast_r50':
+        slow_inputs = []
+        fast_inputs = []
+        for file in files:
+            video =  EncodedVideo.from_path(file)
+            video_data = transform_clips(video=video, model_name=model_name)
+            del video
+            slow_inputs.append(video_data['video'][0])
+            fast_inputs.append(video_data['video'][1])
+        
+        fast_inputs = torch.stack(fast_inputs)
+        slow_inputs = torch.stack(slow_inputs)
 
-    inputs = []
-    for file in files:
-        video =  EncodedVideo.from_path(file)
-        video_data = transform_clips(video=video, model_name=model_name)
-        del video
-        inputs.append(video_data['video'])
-    inputs = torch.stack(inputs)
+        inputs = np.array((slow_inputs, fast_inputs), dtype='object')
+    else:
+        inputs = []
+        for file in files:
+            video =  EncodedVideo.from_path(file)
+            video_data = transform_clips(video=video, model_name=model_name)
+            del video
+            inputs.append(video_data['video'])
+        
+        inputs = torch.stack(inputs)
 
     return inputs
 
@@ -121,7 +205,11 @@ def layer_activations(model, layer, inputs):
 
     def get_activation(name):
         def hook(model, input, output):
-            activations[name] = output.detach()
+            activations[name] = output
+            try:
+                output = output.detach()
+            except:
+                pass
         return hook
 
     # Register hook
@@ -185,19 +273,31 @@ def comp_curves(batch, model, model_name, layer, batches, data_shape, dtype, shm
     print(f'starting batch {batch}')
     start_time = round(time.time())
 
-    # Load in shared memory
     existing_shm = shared_memory.SharedMemory(name=shm_name)
-    encoded_videos = np.ndarray(data_shape, dtype=dtype, buffer=existing_shm.buf)
+    serialized_data_copy = bytes(np.ndarray((data_shape,), dtype='B', buffer=existing_shm.buf))
+    encoded_videos = pickle.loads(serialized_data_copy)
 
     # Select videos current batch
-    batch_size = int(encoded_videos.shape[0]/batches)
-    batch_videos = torch.tensor(encoded_videos[int(batch*batch_size):int((batch+1)*batch_size), :, :, :, :])
+    if model_name == 'slowfast_r50':
+        batch_size = int(encoded_videos[0].shape[0]/batches)
+        slow_batch = torch.tensor(encoded_videos[0][int(batch*batch_size):int((batch+1)*batch_size), :, :, :, :])
+        fast_batch = torch.tensor(encoded_videos[1][int(batch*batch_size):int((batch+1)*batch_size), :, :, :, :])
+        batch_videos = [slow_batch, fast_batch]
+
+        # Get pixel values
+        pixel_list = [slow_batch[i] for i in range(slow_batch.shape[0])]
+    else:
+        batch_size = int(encoded_videos.shape[0]/batches)
+        batch_videos = torch.tensor(encoded_videos[int(batch*batch_size):int((batch+1)*batch_size), :, :, :, :])
+
+        # Get pixel values
+        pixel_list = [batch_videos[i] for i in range(batch_videos.shape[0])]
 
     # Get activations
-    if model_name in ['i3d_r50', 'c2d_r50', 'slowfast_r50']: # video models
+    if model_name in ['i3d_r50', 'c2d_r50', 'slow_r50', 'slowfast_r50', 'r2plus1d_r50', 'csn_r101', 'x3d_s', 'mvit_base_16x4']: # video models
         activations = layer_activations(model=model, layer=layer, inputs=batch_videos)
         activation_list = [activations[layer][i] for i in range(activations[layer].shape[0])]
-
+    
     elif model_name in ['resnet50', 'vgg19', 'alexnet']: # static models
         batch_activations = []
         for video in range(batch_videos.shape[0]):
@@ -210,9 +310,6 @@ def comp_curves(batch, model, model_name, layer, batches, data_shape, dtype, shm
         batch_activations = torch.stack(batch_activations)
         activation_list = [batch_activations[i] for i in range(batch_activations.shape[0])]
     
-    # Get pixel values
-    pixel_list = [batch_videos[i] for i in range(batch_videos.shape[0])]
-            
     # Calculate curvature
     curves = []
     pixel_curves = []

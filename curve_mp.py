@@ -29,32 +29,34 @@ def comp_curv_mp(model, model_name, layer, encoded_videos, out_batch, in_batches
 
     start_time = time.time()
 
-    shm_name = f'{model_name}_{layer}_{out_batch}'
+    shm_name = f'{model_name}_{layer[0:8]}_{out_batch}'
+
+    serialized_data = pickle.dumps(encoded_videos)
 
     try:
-        shm = shared_memory.SharedMemory(create=True, size=encoded_videos.nbytes, name=shm_name)
+        shm = shared_memory.SharedMemory(create=True, size=len(serialized_data), name=shm_name)
     except FileExistsError:
         shm_old = shared_memory.SharedMemory(shm_name, create=False)
         shm_old.close()
         shm_old.unlink()
-        shm = shared_memory.SharedMemory(create=True, size=encoded_videos.nbytes, name=shm_name)
+        shm = shared_memory.SharedMemory(create=True, size=len(serialized_data), name=shm_name)
     except Exception as e:
         print(f"Shared memory error: {e}")
         return None
+       
 
     # Create a np.recarray using the buffer of shm
-    shm_videos = np.recarray(shape=encoded_videos.shape, dtype=encoded_videos.dtype, buf=shm.buf)
+    shm_videos = np.ndarray(len(serialized_data), dtype='B', buffer=shm.buf)
 
     # Copy the data into the shared memory
-    np.copyto(shm_videos, encoded_videos)
+    shm_videos[:] = np.frombuffer(serialized_data, dtype='B')
 
- 
     partial_curv = partial(comp_curves, 
                         model = model,
                         model_name = model_name,
                         layer = layer, 
                         batches = in_batches,
-                        data_shape = encoded_videos.shape,
+                        data_shape = len(serialized_data),
                         dtype = encoded_videos.dtype,
                         shm_name = shm_name)
 
