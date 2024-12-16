@@ -69,13 +69,14 @@ def load_model():
     Load according model and settings.
     """
 
-    if args.model_name in ['c2d_r50', 'i3d_r50', 'slowfast_r50', 'slow_r50']:
+    if args.model_name in ['c2d_r50', 'i3d_r50', 'slowfast_r50', 'slow_r50', 'r2plus1d_r50', 'csn_r101', 'x3d_s', 'mvit_base_16x4']:
         model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=args.pretrained, force_reload=True)
     elif args.model_name in ['alexnet', 'vgg19', 'resnet50']:
         model = torch.hub.load('pytorch/vision:v0.10.0', args.model_name, pretrained=True)
 
     model.eval()
     print(f'Model {args.model_name} loaded succesfully')
+    layer_names = [name for name, _ in model.named_modules()]
 
     # Set to according layer 
     if args.model_name == 'slowfast_r50':
@@ -85,7 +86,7 @@ def load_model():
             args.layer = 'blocks.2.multipathway_fusion.activation'
         elif args.layer == 'late':
             args.layer = 'blocks.4.multipathway_fusion'
-    elif args.model_name == 'slow_r50':
+    elif args.model_name in  ['slow_r50', 'r2plus1d_r50']:
         if args.layer == 'early': 
             args.layer = 'blocks.0.activation'
         elif args.layer == 'mid':
@@ -99,6 +100,27 @@ def load_model():
             args.layer = 'blocks.3.res_blocks.3.activation'
         elif args.layer == 'late':
             args.layer = 'blocks.5.res_blocks.2.activation'
+    elif args.model_name == 'csn_r101':
+        if args.layer == 'early': 
+            args.layer = 'blocks.0.activation'
+        elif args.layer == 'mid':
+            args.layer = 'blocks.3.res_blocks.8.activation'
+        elif args.layer == 'late':
+            args.layer = 'blocks.4.res_blocks.2.activation'
+    elif args.model_name == 'x3d_s':
+        if args.layer == 'early': 
+            args.layer = 'blocks.0.activation'
+        elif args.layer == 'mid':
+            args.layer = 'blocks.3.res_blocks.4.activation'
+        elif args.layer == 'late':
+            args.layer = 'blocks.4.res_blocks.6.activation'
+    elif args.model_name == 'mvit_base_16x4':
+        if args.layer == 'early': 
+            args.layer = 'blocks.0.mlp'
+        elif args.layer == 'mid':
+            args.layer = 'blocks.7.mlp.fc2'
+        elif args.layer == 'late':
+            args.layer = 'blocks.15.mlp.fc2'
 
 
     # Static models
@@ -159,7 +181,6 @@ if __name__ == '__main__':
     # os.environ['TORCH_HOME'] = '/ivi/zfs/s0/original_homes/azonnev/.cache'
     # print("cache log: ")
     # print(os.getenv('TORCH_HOME'))
-
 
     # Compute curvature 
     results = compute_all_curvature(out_batch = args.out_batch, out_batches=args.out_batches, n_cpus=args.n_cpus)
