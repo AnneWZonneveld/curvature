@@ -18,6 +18,7 @@ import json
 import urllib
 import torch 
 from tqdm import tqdm
+import fcntl
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt 
@@ -39,6 +40,9 @@ from torchvision.transforms._transforms_video import (
     CenterCropVideo,
     NormalizeVideo,
 )
+
+# import logging
+# mp.log_to_stderr(logging.DEBUG)
 
 
 # ---------------- Input 
@@ -69,10 +73,20 @@ def load_model():
     Load according model and settings.
     """
 
-    if args.model_name in ['c2d_r50', 'i3d_r50', 'slowfast_r50', 'slow_r50', 'r2plus1d_r50', 'csn_r101', 'x3d_s', 'mvit_base_16x4']:
-        model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=args.pretrained, force_reload=True)
-    elif args.model_name in ['alexnet', 'vgg19', 'resnet50']:
-        model = torch.hub.load('pytorch/vision:v0.10.0', args.model_name, pretrained=True)
+
+    lock_file = '/ivi/zfs/s0/original_homes/azonnev/.cache/hub/pytorchvideo-main.lock'
+
+    # Open and lock the file
+    with open(lock_file, 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+
+        if args.model_name in ['c2d_r50', 'i3d_r50', 'slowfast_r50', 'slow_r50', 'r2plus1d_r50', 'csn_r101', 'x3d_s', 'mvit_base_16x4']:
+            model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=args.pretrained, force_reload=True)
+        elif args.model_name in ['alexnet', 'vgg19', 'resnet50']:
+            model = torch.hub.load('pytorch/vision:v0.10.0', args.model_name, pretrained=True)
+
+        fcntl.flock(lock, fcntl.LOCK_UN)  # Release the lock
+
 
     model.eval()
     print(f'Model {args.model_name} loaded succesfully')
@@ -177,10 +191,11 @@ def compute_all_curvature(out_batch, out_batches=19, in_batches=29, n_cpus=1):
 
 # ------------------- MAIN
 if __name__ == '__main__':
-    # # Setting and checking cache
-    # os.environ['TORCH_HOME'] = '/ivi/zfs/s0/original_homes/azonnev/.cache'
-    # print("cache log: ")
-    # print(os.getenv('TORCH_HOME'))
+
+    # Setting and checking cache
+    os.environ['TORCH_HOME'] = '/ivi/zfs/s0/original_homes/azonnev/.cache'
+    print("cache log: ")
+    print(os.getenv('TORCH_HOME'))
 
     # Compute curvature 
     results = compute_all_curvature(out_batch = args.out_batch, out_batches=args.out_batches, n_cpus=args.n_cpus)

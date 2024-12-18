@@ -18,9 +18,12 @@ import seaborn as sns
 import matplotlib.pyplot as plt 
 from IPython import embed as shell
 import math
+from pytorchvideo.data.encoded_video import EncodedVideo
+# import logging
+# mp.log_to_stderr(logging.DEBUG)
+
 from curve_utils import *
 
-from pytorchvideo.data.encoded_video import EncodedVideo
 
 def comp_curv_mp(model, model_name, layer, encoded_videos, out_batch, in_batches, n_cpus):
 
@@ -37,6 +40,10 @@ def comp_curv_mp(model, model_name, layer, encoded_videos, out_batch, in_batches
         shm_old.close()
         shm_old.unlink()
         shm = shared_memory.SharedMemory(create=True, size=len(serialized_data), name=shm_name)
+    except Exception as e:
+        print(f"Shared memory error: {e}")
+        return None
+       
 
     # Create a np.recarray using the buffer of shm
     shm_videos = np.ndarray(len(serialized_data), dtype='B', buffer=shm.buf)
@@ -53,15 +60,25 @@ def comp_curv_mp(model, model_name, layer, encoded_videos, out_batch, in_batches
                         dtype = encoded_videos.dtype,
                         shm_name = shm_name)
 
-    # inner batch 
-    bs = range(in_batches)
-    pool = mp.Pool(n_cpus)
+
+    print('Before opening pool')
+    assert n_cpus > 0, "n_cpus must be greater than 0"
+    try:
+        ctx = mp.get_context('spawn')  # or 'spawn' for cross-platform compatibility
+        pool = ctx.Pool(n_cpus)
+    except Exception as e:
+        print(f"Failed to open pool: {e}")
+
+    print('Opened pool')
 
     try:
+        bs = range(in_batches)
         results = pool.map(partial_curv, bs)
     finally:
         pool.close()
         pool.join()
+    
+    print('Closed pool')
 
     shm.close()
     shm.unlink()

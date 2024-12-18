@@ -17,7 +17,7 @@ import json
 import urllib
 import pandas as pd
 from IPython import embed as shell
-from sklearn.decomposition import PCA
+from tqdm import tqdm
 import torch 
 import psutil
 from torchvision.transforms import Compose, Lambda
@@ -33,18 +33,21 @@ from pytorchvideo.transforms import (
     UniformTemporalSubsample
 )
 
+
 # ------------------- Input arguments
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_name', default='i3d_r50', type=str)
 parser.add_argument('--pretrained', default=1, type=int)
 parser.add_argument('--layer', default='late', type=str)
 parser.add_argument('--data_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/data/mp4_h264', type=str)
-parser.add_argument('--wd', default='/Users/annewzonneveld/Documents/phd/projects/curvature', type=str)
+parser.add_argument('--res_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/results', type=str)
 args = parser.parse_args()
 
 print('\nInput arguments:')
 for key, val in vars(args).items():
 	print('{:16} {}'.format(key, val))
+
+start_time = time.time()
 
 #### ----------------
 
@@ -130,7 +133,7 @@ def top5_preds(inputs):
     
     """
 
-    preds = model(inputs) #i
+    preds = model(inputs) 
     preds = torch.nn.functional.softmax(preds, dim=1) 
     pred_class_ids = preds.topk(k=5).indices
 
@@ -166,9 +169,6 @@ def layer_activations(model, layer, inputs):
     returns convoluted tensor (# of videos, # of frames, #height, #width)
 
     """
-    print("Extracting activations")
-
-    print("Extracting activations")
 
     # Get intermediate activations
     activations = {}
@@ -217,7 +217,9 @@ print("cache log: ")
 print(os.getenv('TORCH_HOME'))
 
 # Load model
-model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=args.pretrained)
+model = torch.hub.load('facebookresearch/pytorchvideo', args.model_name, pretrained=args.pretrained, force_reload=True)
+model.eval()
+print(f'Model {args.model_name} loaded succesfully')
 
 # Set to according layer 
 if args.model_name == 'slow_r50':
@@ -241,9 +243,8 @@ batches = 551
 batch_size = int(len(files)/batches)
 
 results_df = pd.DataFrame()
-for batch in range(batches):
 
-    print(f"Processing batch {batch}")
+for batch in tqdm(range(batches)):
 
     # Encode batch of videos
     batch_files = files[int(batch*batch_size):int((batch+1)*batch_size)]
@@ -256,17 +257,24 @@ for batch in range(batches):
     extract_df['activation'] = [activations[args.layer][i] for i in range(activations[args.layer].shape[0])]
     extract_df['pixels'] = [encoded_videos[i] for i in range(encoded_videos.shape[0])]
 
-    # Perform dimensionality reduction on 2nd axis
-    
+    # Perform PCA / dimensionality reduction
+
     results_df = pd.concat([results_df, extract_df], axis=0)
 
-    del results
+
+end_time = time.time()
+elapsed_time = end_time - start_time
+
+print(f'Done extracting features in {elapsed_time/60} minutes')
 
 # Save results
-res_folder = args.res_dir + f'/results/features/{args.model_name}/pt_{args.pretrained}/{args.layer}'
+res_folder = args.res_dir + f'/features/{args.model_name}/pt_{args.pretrained}/{args.layer}'
 if not os.path.exists(res_folder) == True:
     os.makedirs(res_folder)
 
 file_path = res_folder + '/res_df.pkl'
 with open(file_path, 'wb') as f:
     pickle.dump(results_df, f)
+
+print(f'Results stored at {file_path}')
+
