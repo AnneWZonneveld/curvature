@@ -16,18 +16,9 @@ from sklearn.utils import resample
 from IPython import embed as shell
 from scipy.stats import pearsonr, spearmanr
 import math
-import tensorflow as tf
-import tensorflow_hub as hub
-from datasets import Dataset
-import bokeh.plotting as bp
-from bokeh.models import HoverTool, BoxSelectTool, ColumnarDataSource, LinearColorMapper, ColumnDataSource, CategoricalColorMapper
-from bokeh.transform import factor_cmap
-from bokeh.palettes import Turbo256
-
 
 # ------------------- Input arguments
 parser = argparse.ArgumentParser()
-parser.add_argument('--model_name', default='i3d_r50', type=str)
 # parser.add_argument('--wd', default='/home/azonnev/analyses/curvature', type=str)
 parser.add_argument('--wd', default='/Users/annewzonneveld/Documents/phd/projects/curvature', type=str)
 parser.add_argument('--res_dir', default='/Users/annewzonneveld/Documents/phd/projects/curvature/results', type=str)
@@ -66,18 +57,50 @@ def load_data(model_name, layer, pretrained=1):
     """
 
     print(f'Loading curvature data for {layer} layer pt {pretrained}')
-
-    # Set to according layer  
-    if model_name == 'slow_r50':
-        if layer == 'late': 
-            layer = 'blocks.4.res_blocks.2.activation'
-    elif model_name == 'i3d_r50':
+ 
+    # Set to according layer 
+    if args.model_name == 'slowfast_r50':
         if layer == 'early': 
-            layer = 'blocks.1.res_blocks.2.activation'''
+            layer = 'blocks.0.multipathway_fusion.activation'
+        elif layer == 'mid':
+            layer = 'blocks.2.multipathway_fusion.activation'
+        elif layer == 'late':
+            layer = 'blocks.4.multipathway_fusion'
+    elif model_name in  ['slow_r50', 'r2plus1d_r50']:
+        if layer == 'early': 
+            layer = 'blocks.0.activation'
+        elif layer == 'mid':
+            layer = 'blocks.2.res_blocks.3.activation'
+        elif layer == 'late':
+            layer = 'blocks.4.res_blocks.2.activation'
+    elif model_name in ['i3d_r50', 'c2d_r50']:
+        if layer == 'early': 
+            layer = 'blocks.1.res_blocks.2.activation'
         elif layer == 'mid':
             layer = 'blocks.3.res_blocks.3.activation'
         elif layer == 'late':
             layer = 'blocks.5.res_blocks.2.activation'
+    elif model_name == 'csn_r101':
+        if model_name == 'early': 
+            model_name = 'blocks.0.activation'
+        elif model_name == 'mid':
+            model_name = 'blocks.3.res_blocks.8.activation'
+        elif model_name == 'late':
+            model_name = 'blocks.4.res_blocks.2.activation'
+    elif model_name == 'x3d_s':
+        if model_name == 'early': 
+            model_name = 'blocks.0.activation'
+        elif model_name == 'mid':
+            model_name = 'blocks.3.res_blocks.4.activation'
+        elif model_name == 'late':
+            model_name = 'blocks.4.res_blocks.6.activation'
+    elif model_name == 'mvit_base_16x4':
+        if model_name == 'early': 
+            model_name = 'blocks.0.mlp'
+        elif model_name == 'mid':
+            model_name = 'blocks.7.mlp.fc2'
+        elif model_name == 'late':
+            model_name = 'blocks.15.mlp.fc2'
     
     # Static models
     elif model_name == 'resnet50':
@@ -278,7 +301,7 @@ def layers_rel_curve_plot(model_name, pretrained=1):
     plt.clf()
 
 
-def layers_abs_curve_plot(pretrained=1):
+def layers_abs_curve_plot(pretrained=1, model_name):
     """ 
     Plots the absolute pixel and feature curvature for different layers.
 
@@ -291,7 +314,7 @@ def layers_abs_curve_plot(pretrained=1):
 
     # Load data
     print('Loading data')
-    data_dir = args.wd + f'/results/features/{args.model_name}/pt_{pretrained}/'
+    data_dir = args.wd + f'/results/features/{model_name}/pt_{pretrained}/'
     layers = os.listdir(data_dir)
     data_dict = {layer: load_data(model_name=model_name, layer=layer, pretrained=1) for layer in layers}
 
@@ -417,7 +440,7 @@ def layers_dyn_vs_static(static_model, dynamic_model, pretrained=1):
 
     # Plot
     fig, ax = plt.subplots(dpi=300)
-    sns.pointplot(data=df[df['layer'] != 'pixel'], x="layer", y="curve", hue="model", join=False, markers='o', dodge=True, ax=ax)
+    sns.pointplot(data=df[df['layer'] != 'pixel'], x="layer", y="curve", hue="", join=False, markers='o', dodge=True, ax=ax)
     ax.scatter('pixel', 0, color='gray', s=100, label='pixel', zorder=5)
     plt.axhline(y=0, color='gray', linestyle='-', linewidth=2, alpha=0.7)
     ax.set_title(f'{dynamic_model}')
@@ -436,92 +459,111 @@ def layers_dyn_vs_static(static_model, dynamic_model, pretrained=1):
     plt.clf()
 
 
-def time_series_plot(df):
-    """
-    Not done.
-    """
+def compare_models(pretrained=1)
 
-    # Reformat data
-    n_videos = len(df)
-    n_curvs = df['all_curvs'].iloc[0].shape[0]
-    vid_id = np.repeat(np.array([*range(len(df))]) + 1, n_curvs)
-    curv_id = [*range(n_curvs)] * len(df)
-    curves = [item for sublist in df['all_curvs'] for item in sublist]
-    
-    rf_df = pd.DataFrame()
-    rf_df['vid_id'] = vid_id
-    rf_df['curv_id'] = curv_id
-    rf_df['curve'] = curves
+    models = ['resnet50','i3d_r50']
 
-    # Plot
-    fig, ax = plt.subplots(dpi=500)
-    sns.boxplot(data=rf_df, x='curv_id', y='curve', ax=ax, width = 0.3)
-    # sns.stripplot(data=rf_df, x='curv_id', y='curve', hue='vid_id', ax=ax, 
-    #             dodge=True, jitter=True, palette='husl', alpha=0.7, size=5)
+    # Load data
+    print('Loading data')
+    all_models = []
+    all_layers = []
+    all_curves = []
+    all_model_types = []
+    for model_name in models:
+        model_dir = args.wd + f'/results/features/{model_name}/pt_{pretrained}/'
 
-    # Plot transparent lines connecting individual measurements across timepoints
-    for vid_id in rf_df['vid_id'].unique():
-        individual_data = rf_df[rf_df['vid_id'] == vid_id]
-        plt.plot(individual_data['curv_id'], individual_data['curve'], 
-                color='gray', alpha=0.2, linewidth=1, zorder=1)
+        if model_name in ['resnet50']:
+            model_type = 'static'
+        elif model_name in ['i3d_r50']:
+            model_type = 'dynamic'
 
-    # Customize labels and title
-    ax.set_title('Curve over time')
-    ax.set_xlabel('time')
-    ax.set_ylabel('curve')
+        layers = sorted(os.listdir(model_dir))
+        for i in range(len(layers)):
+            
+            if i == 0:
+                layer_name = 'early'
+            elif i == 1:
+                layer_name = 'mid'
+            elif i == 2:
+                layer_name = 'late'
 
-    # # Optional: remove legend for 'measurement'
-    # ax.legend_.remove()
-    sns.despine(offset=10, top=True, right=True)
+            layer = layers[i]
+            data = load_data(model_name=model_name, layer=layer, pretrained=1) 
+            all_models.extend(len(data)*[model_name])
+            all_layers.extend(len(data)*[layer_name])
+            all_model_types.extend(len(data)*[model_type])
+            all_curves.extend(list(data['rel_curve']))
+ 
+    df = pd.DataFrame()
+    df['model'] = all_models
+    df['layer'] = all_layers
+    df['rel_curve'] = all_curves
+    df['model_type'] = all_model_types
+
+    # Create subplots
+    layers = ["early", "mid", "late"]
+    fig, axes = plt.subplots(1, len(layers), figsize=(15, 5), dpi=300, sharey=True)
+
+    # Iterate over layers and corresponding subplot axes
+    for i, layer in enumerate(layers):
+        ax = axes[i]
+
+        # Filter data for the current layer
+        layer_data = df[df["layer"] == layer]
+        
+        # Create boxplot for the current layer
+        sns.boxplot(
+            data=layer_data,
+            x="model",
+            y="rel_curve",
+            hue="model_type",
+            ax=ax,
+            dodge=True,
+        )
+        
+        # Customize the axis and title
+        ax.set_title(f"{layer.capitalize()} Layer", fontsize=10)
+        ax.set_xlabel("Model")  # Set x-axis label as "Model"
+        if i == 0:
+            ax.set_ylabel("Straightening")  # Add y-axis label only to the first subplot
+        else:
+            ax.set_ylabel("")  # Remove y-axis label from other subplots
+        
+        # Move the legend to the last subplot
+        if i < len(layers) - 1:
+            ax.get_legend().remove()
+
+        sns.despine(offset=10, top=True, right=True)
+
+    # Add a single legend on the last subplot
+    handles, labels = ax.get_legend_handles_labels()
+    axes[-1].legend(handles, labels, title="Model Type", loc="upper right", fontsize=8)
+
+    # Adjust subplot layout
     fig.tight_layout()
 
-    output_dir = args.wd + f'/results/figures/{args.model_name}/pt_{args.pretrained}/{args.layer}/'
-    if not os.path.exists(output_dir) == True:
+    # Save
+    output_dir = args.res_dir + f'/figures/compare_models/pt_{pretrained}'
+    if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    img_path = output_dir + f'/time_series_plot.png'
+    img_path = output_dir + f'/all_models.png'
     plt.savefig(img_path)
     plt.clf()
-
-
-def scatter_plot(df, x, y):
-
-    # Test correlation
-    res = spearmanr(df[x], df[y])
-    stat = round(res[0], 4)
-    p_val = round(res[1], 4)
-
-    # Plot
-    fig, ax = plt.subplots(dpi=300)
-    sns.scatterplot(data=df, x=x, y=y)
-    ax.set_title(f'{args.model_name} {args.layer}''\n'f'spearman: {stat}, p: {p_val}')
-    ax.set_xlabel(x)
-    ax.set_ylabel(y)
-    sns.despine(offset= 10, top=True, right=True)
-    fig.tight_layout()
-
-    output_dir = args.wd + f'/results/figures/{args.model_name}/{args.layer}'
-    if not os.path.exists(output_dir) == True:
-        os.makedirs(output_dir)
-
-    img_path = output_dir + f'/scatter_{x}_{y}.png'
-    plt.savefig(img_path)
-    plt.clf()
-
 
 # ---------------- MAIN
 
 shell()
 
-# Plot distributions
-distr_plot(layer = 'late', pretrained=1)
+# # Plot distributions
+# distr_plot(model_name='i3d_r50', layer='late', pretrained=1)
 
-# Plot untrained vs pretrained relative curve plots
-pt0_vs_pt1_rel_distr_plot(layer = 'late')
+# # Plot untrained vs pretrained relative curve plots
+# pt0_vs_pt1_rel_distr_plot(model_name='i3d_r50',layer = 'late')
 
 # Plot relative curve for different layers
-layers_rel_curv_plot(pretrained=1)
-layers_abs_curv_plot(pretrained=1)
+layers_rel_curv_plot(model_name='i3d_r50', pretrained=1)
+layers_abs_curv_plot(model_name='i3d_r50', pretrained=1)
 
 # Plot relationships variables of interest 
 # scatter_plot(df=curve_data, x='curve', y='norm')
